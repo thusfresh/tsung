@@ -76,6 +76,7 @@
                        ts_utils,
                        ts_webdav,
                        ts_websocket,
+                       ts_mainframe,
                        uuid,
                        websocket
                       ]},

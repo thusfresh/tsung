@@ -1,0 +1,666 @@
+<?xml version="1.0"?>
+<!DOCTYPE tsung SYSTEM "/home/mosic/src/tsung-1.7.0/tsung-1.0.dtd"
+[
+<!ENTITY duration "5">
+<!ENTITY user_total "1">
+<!ENTITY user_arrival "1">
+<!ENTITY sleep_duration "1">
+<!ENTITY hostname "localhost">
+<!ENTITY port "4000">
+]
+>
+<tsung loglevel="debug"  dumptraffic="true" version="1.0">
+  <clients>
+    <client host="&hostname;" use_controller_vm="true" maxusers="500" />
+  </clients>
+
+  <servers>
+    <server host="&hostname;" port="&port;" type="tcp" />
+  </servers>
+
+  <load>
+    <arrivalphase phase="1" duration="&duration;" unit="second">
+      <users maxnumber="&user_total;" arrivalrate="&user_arrival;" unit="second" />
+    </arrivalphase>
+  </load>
+
+  <sessions>
+    <session name="foo" probability="100" type="ts_mainframe" bidi="true">
+
+      <transaction name="connect">
+        <request>
+          <mainframe type="connect"/>
+        </request>
+      </transaction>
+
+      <transaction name="login">
+        <request>
+          <mainframe type="login" username="sebastien" password="secret"/>
+        </request>
+      </transaction>
+
+
+      <!-- <thinktime value="&sleep_duration;" random="false"/> -->
+
+
+      <transaction name="loading">
+        <request subst="true">
+          <mainframe type="perform">
+            <variables>
+              <number name="avatarSize">50</number>
+              <number name="botLogoHeight">26</number>
+            </variables>
+            <query name="RootContainerQuery">
+              query RootContainerQuery($avatarSize: Int!, $botLogoHeight: Int!) {
+                session {
+                  ...RootContainer_session
+                  id
+                }
+              }
+
+              fragment RootContainer_session on Session {
+                actor {
+                  displayId
+                  displayName
+                  id
+                  uref
+                }
+                counts {
+                  badgeCount
+                }
+                enabledBots {
+                  avatarUrl(size: $avatarSize)
+                  logoUrl(height: $botLogoHeight)
+                  color
+                  displayId
+                  displayName
+                  id
+                  menus {
+                    iconUrl(size: $avatarSize)
+                    payload
+                    title
+                    type
+                    url
+                  }
+                  uref
+                  flags {
+                    supportsQuickMenus
+                    supportsMentions
+                    supportsSubscriptions
+                  }
+                }
+                ownOrgs: memberships(filter: ME) {
+                  id
+                }
+              }
+            </query>
+          </mainframe>
+        </request>
+
+        <request subst="true">
+          <mainframe type="perform">
+            <variables>
+              <list name="keys">
+                <string>hasCompletedOnboarding</string>
+                <string>rhelper_homescreen_basic</string>
+                <string>helper_homescreen_team_invite</string>
+                <string>helper_homescreen_team_setup</string>
+                <string>webRegistration</string>
+                <string>helper_todo_basic</string>
+              </list>
+            </variables>
+            <query name="LoginStorage">
+              query LoginStorage ($keys: [String]!) {
+                values: getStorageKeys(keys: $keys)
+              }
+            </query>
+          </mainframe>
+        </request>
+
+        <request subst="true">
+          <mainframe type="perform">
+            <variables>
+              <number name="avatarSize">50</number>
+            </variables>
+            <query name="HomeScreenQuery">
+              query HomeScreenQuery($avatarSize: Int!) {
+                session {
+                  ...HomeScreen_session
+                  id
+                }
+              }
+
+              fragment HomeScreen_session on Session {
+                ...AccountSection_session
+                ...BotSection_session
+                ...DirectMessageSection_session
+                ...OrgSection_session
+                }
+
+              fragment AccountSection_session on Session {
+                ...CubicleItem_session
+                ...InboxItem_session
+                ...ToDoItem_session
+                actor {
+                  ...SelfHeader_actor
+                  id
+                }
+                counts {
+                  incomingAssignedActions
+                  incompleteAssignedActions
+                  mentionedInbox
+                  unreadInbox
+                }
+                cubicle {
+                  flags {
+                    mentioned
+                    unread
+                    unseenActions
+                  }
+                  id
+                }
+                ownOrgs: memberships(filter: ME) {
+                  ...AccountSection_ownOrg
+                  ...SelfHeader_org
+                  id
+                  spaces(filter: JOINED) {
+                    ...SpaceItem_space
+                    conversationId
+                    conversation {
+                      flags {
+                        mentioned
+                        unread
+                      }
+                      subject
+                      id
+                    }
+                  }
+                }
+                guestMemberships: memberships(filter: GUEST) {
+                  ...AccountSection_guestOrg
+                  id
+                  spaces(filter: JOINED) {
+                    ...SpaceItem_space
+                    conversationId
+                    conversation {
+                      flags {
+                        mentioned
+                        unread
+                      }
+                    subject
+                    id
+                    }
+                  }
+                }
+              }
+
+              fragment BotSection_session on Session {
+                id
+                actor {
+                  id
+                }
+                counts {
+                  unreadBots
+                }
+                botMailbox(first: 10) {
+                  pageInfo {
+                    hasNextPage
+                    endCursor
+                    hasPreviousPage
+                    startCursor
+                  }
+                  edges {
+                    node {
+                      ...BotItem_actor
+                      conversation {
+                        id
+                        flags {
+                          mentioned
+                          unread
+                        }
+                      }
+                      id
+                      __typename
+                    }
+                    cursor
+                  }
+                }
+              }
+
+              fragment DirectMessageSection_session on Session {
+                id
+                actor {
+                  id
+                }
+                counts {
+                  mentionedDirect
+                  unreadDirect
+                }
+                contactMailbox(first: 10) {
+                  pageInfo {
+                    hasNextPage
+                    endCursor
+                    hasPreviousPage
+                    startCursor
+                  }
+                  edges {
+                    node {
+                      id
+                      actor {
+                        ...DirectMessageItem_actor
+                        ... on Node {
+                          id
+                        }
+                        id
+                      }
+                      direct {
+                        ...DirectMessageItem_conversation
+                        id
+                        flags {
+                          mentioned
+                          unread
+                        }
+                      }
+                      __typename
+                    }
+                    cursor
+                  }
+                }
+              }
+
+              fragment OrgSection_session on Session {
+                memberships(filter: MEMBER) {
+                  ...AvailableSpaces_org
+                  ...OrgHeader_org
+                  ...HomeHelperTeamInvite_org
+                  actor {
+                    __typename
+                    displayId
+                    ... on Node {
+                      id
+                    }
+                  }
+                  availableSpaces: spaces(filter: AVAILABLE) {
+                    conversationId
+                  }
+                  id
+                  joinedSpaces: spaces(filter: JOINED) {
+                    ...SpaceItem_space
+                    conversationId
+                    conversation {
+                      flags {
+                        mentioned
+                        unread
+                      }
+                      subject
+                      id
+                    }
+                  }
+                  selfRoles {
+                    isAdmin
+                    isGuest
+                    isPending
+                  }
+                }
+              }
+
+              fragment AvailableSpaces_org on Org {
+                spaces(filter: AVAILABLE) {
+                  ...AvailableSpaces_space
+                  conversationId
+                  name
+                }
+              }
+
+              fragment OrgHeader_org on Org {
+                ...OrgMetrics_org
+                id
+                memberCount
+                actor {
+                  __typename
+                  ...SimpleAvatarAccountHome_actor
+                  displayId
+                  displayName
+                  ... on Node {
+                    id
+                  }
+                }
+                adminSettings {
+                  pendingCount
+                }
+                selfRoles {
+                  isAdmin
+                  isPending
+                }
+              }
+
+              fragment HomeHelperTeamInvite_org on Org {
+                ...OrgMetrics_org
+                adminSettings {
+                  inviteUrl
+                  joinsRestricted
+                  invitedEmails
+                }
+                id
+              }
+
+              fragment SpaceItem_space on OrgSpace {
+                conversationId
+                conversation {
+                  ...SimpleAvatarHome_conversation
+                  flags {
+                    mentioned
+                    unread
+                    unseenActions
+                  }
+                  moderatorSettings {
+                    pendingParticipantsCount
+                  }
+                  subject
+                  id
+                }
+              }
+
+              fragment SimpleAvatarHome_conversation on Conversation {
+                avatarUrl(size: $avatarSize)
+                subject
+              }
+
+              fragment OrgMetrics_org on Org {
+                actor {
+                  __typename
+                  displayId
+                  displayName
+                  ... on NativeActor {
+                    subtype
+                  }
+                  ... on Node {
+                    id
+                  }
+                }
+                adminSettings {
+                  guests {
+                    actor {
+                      __typename
+                      ... on Node {
+                        id
+                      }
+                    }
+                  }
+                }
+                roster {
+                  actor {
+                    __typename
+                    ... on Node {
+                      id
+                    }
+                  }
+                }
+                selfRoles {
+                  isAdmin
+                  isMaster
+                  isGuest
+                  isPending
+                }
+                metricsSpaces: spaces {
+                  conversationId
+                }
+              }
+
+              fragment SimpleAvatarAccountHome_actor on Actor {
+                displayId
+                displayName
+                avatarUrl(size: $avatarSize)
+              }
+
+              fragment AvailableSpaces_space on OrgSpace {
+                conversationId
+                conversation {
+                  ...SimpleAvatarHome_conversation
+                  subject
+                  id
+                }
+              }
+
+              fragment DirectMessageItem_actor on Actor {
+                ...SimpleAvatarAccountHome_actor
+                ... on Node {
+                  id
+                }
+                displayId
+                displayName
+              }
+
+              fragment DirectMessageItem_conversation on Conversation {
+                id
+                flags {
+                  mentioned
+                  unseenActions
+                  unread
+                }
+              }
+
+              fragment BotItem_actor on BotActor {
+                ...SimpleAvatarAccountHome_actor
+                conversation {
+                  id
+                  flags {
+                    mentioned
+                    unseenActions
+                    unread
+                  }
+                }
+                displayId
+                displayName
+                id
+              }
+
+              fragment CubicleItem_session on Session {
+                cubicle {
+                  id
+                  flags {
+                    mentioned
+                    unread
+                    unseenActions
+                  }
+                }
+              }
+
+              fragment InboxItem_session on Session {
+                counts {
+                  mentionedInbox
+                  unreadInbox
+                }
+              }
+
+              fragment ToDoItem_session on Session {
+                counts {
+                  incomingAssignedActions
+                  incompleteAssignedActions
+                }
+              }
+
+              fragment SelfHeader_actor on Actor {
+                ...SimpleAvatarAccountHome_actor
+                displayId
+                displayName
+                ... on Node {
+                  id
+                }
+              }
+
+              fragment AccountSection_ownOrg on Org {
+                ...SelfHeader_org
+                id
+                selfRoles {
+                  isGuest
+                }
+                spaces(filter: JOINED) {
+                  ...AccountSection_joinedSpace
+                }
+              }
+
+              fragment SelfHeader_org on Org {
+                id
+              }
+
+              fragment AccountSection_guestOrg on Org {
+                actor {
+                  __typename
+                  displayId
+                  ... on Node {
+                    id
+                  }
+                }
+                id
+                selfRoles {
+                  isGuest
+                }
+                spaces(filter: JOINED) {
+                  ...AccountSection_joinedSpace
+                }
+              }
+
+              fragment AccountSection_joinedSpace on OrgSpace {
+                ...SpaceItem_space
+                conversationId
+                conversation {
+                  flags {
+                    mentioned
+                    unread
+                    unseenActions
+                  }
+                  subject
+                  id
+                }
+              }
+            </query>
+          </mainframe>
+        </request>
+
+        <request subst="true">
+          <mainframe type="perform">
+            <variables>
+              <object name="input">
+                <string name="clientMutationId">presence1504735094462</string>
+                <string name="state">AWAY</string>
+              </object>
+            </variables>
+            <query name="UpdatePresence">
+              mutation UpdatePresence ($input: UpdatePresenceInput!) {
+                updatePresence (input: $input) {
+                  clientMutationId
+                }
+              }
+            </query>
+          </mainframe>
+        </request>
+
+        <request subst="true">
+          <mainframe type="perform">
+            <variables>
+              <number name="avatarSize">40</number>
+              <string name="conversationType">DEFAULT</string>
+              <number name="count">10</number>
+              <null name="cursor"/>
+              <string name="mailboxType">INBOX</string>
+            </variables>
+            <query name="MailboxScreenQuery">
+              query MailboxScreenQuery($avatarSize: Int!, $conversationType: ConversationType!, $count: Int!, $cursor: String, $mailboxType: MailboxType!) {
+                session {
+                  ...MailboxView_session
+                  actor {
+                    id
+                    displayId
+                    displayName
+                    avatarUrl
+                  }
+                  id
+                }
+              }
+
+              fragment MailboxView_session on Session {
+                mailbox(mailboxType: $mailboxType, conversationType: $conversationType) {
+                  id
+                  conversations(first: $count, after: $cursor) {
+                    edges {
+                      cursor
+                      node {
+                        ...ListRow_conversation
+                        id
+                        __typename
+                      }
+                    }
+                    pageInfo {
+                      hasNextPage
+                      endCursor
+                      hasPreviousPage
+                      startCursor
+                    }
+                  }
+                }
+              }
+
+              fragment ListRow_conversation on Conversation {
+                ...SimpleAvatarConvo_conversation
+                id
+                subject
+                type
+                lastRelevantTime
+                avatarUrl(size: $avatarSize)
+                flags {
+                  unread
+                  mentioned
+                  unseenActions
+                }
+                participants(all: true) {
+                  __typename
+                  actor {
+                    __typename
+                    ...SimpleAvatarAccount_actor
+                    ... on Node {
+                      id
+                    }
+                    displayId
+                    displayName
+                  }
+                }
+                lastRelevantMessage {
+                  id
+                  previewBody
+                  actor {
+                    __typename
+                    displayId
+                    displayName
+                    ...SimpleAvatarAccount_actor
+                    ... on Node {
+                      id
+                    }
+                  }
+                }
+              }
+
+              fragment SimpleAvatarConvo_conversation on Conversation {
+                avatarUrl(size: $avatarSize)
+                subject
+              }
+
+              fragment SimpleAvatarAccount_actor on Actor {
+                displayId
+                displayName
+                avatarUrl(size: $avatarSize)
+              }
+            </query>
+          </mainframe>
+        </request>
+      </transaction>
+
+      <transaction name="disconnect">
+        <request>
+          <mainframe type="close"/>
+        </request>
+      </transaction>
+
+    </session>
+  </sessions>
+</tsung>

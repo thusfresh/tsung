@@ -141,7 +141,7 @@ repeat | if | change_type | foreach | set_option | interaction | abort )*>
     persistent   (true | false) #IMPLIED
     probability   NMTOKEN #IMPLIED
     weight        NMTOKEN #IMPLIED
-    type         (ts_jabber | ts_http | ts_raw | ts_pgsql | ts_ldap | ts_webdav |ts_mysql| ts_fs | ts_shell | ts_job | ts_websocket | ts_amqp | ts_mqtt) #REQUIRED>
+    type         (ts_jabber | ts_http | ts_raw | ts_pgsql | ts_ldap | ts_webdav |ts_mysql| ts_fs | ts_shell | ts_job | ts_websocket | ts_amqp | ts_mqtt | ts_mainframe) #REQUIRED>
 
 <!ELEMENT session_setup EMPTY>
 <!ATTLIST session_setup
@@ -171,7 +171,7 @@ repeat | if | change_type | foreach | set_option | interaction | abort )*>
     >
 
 <!ELEMENT request ( match*, dyn_variable*, ( http | jabber | raw |
-          pgsql | ldap | mysql |fs | shell | job | websocket | amqp | mqtt) )>
+          pgsql | ldap | mysql |fs | shell | job | websocket | mainframe | amqp | mqtt) )>
 <!ATTLIST request
     subst (true|false|all_except_body) "false"
     tag   NMTOKEN "undefined"
@@ -382,6 +382,43 @@ repeat | if | change_type | foreach | set_option | interaction | abort )*>
     origin CDATA ""
     subprotocols CDATA ""
     path CDATA "/" >
+
+<!ELEMENT mainframe (query | (variables, query)) >
+<!ATTLIST mainframe
+    type (connect | login | perform | close) #REQUIRED
+    client_id CDATA #IMPLIED
+    username CDATA  #IMPLIED
+    password CDATA  #IMPLIED
+>
+<!ELEMENT query (#PCDATA) >
+<!ATTLIST query
+    name CDATA  #REQUIRED
+>
+<!ELEMENT variables (number | boolean | string | list | object | null)* >
+<!ELEMENT number (#PCDATA) >
+<!ATTLIST number
+    name CDATA  #IMPLIED
+>
+<!ELEMENT boolean (#PCDATA) >
+<!ATTLIST boolean
+    name CDATA  #IMPLIED
+>
+<!ELEMENT string (#PCDATA) >
+<!ATTLIST string
+    name CDATA  #IMPLIED
+>
+<!ELEMENT object (number | boolean | string | list | object | null)* >
+<!ATTLIST object
+    name CDATA  #IMPLIED
+>
+<!ELEMENT list (number | boolean | string | list | object | null)* >
+<!ATTLIST list
+    name CDATA  #IMPLIED
+>
+<!ELEMENT null EMPTY >
+<!ATTLIST null
+    name CDATA  #IMPLIED
+>
 
 <!ELEMENT amqp (#PCDATA) >
 <!ATTLIST amqp

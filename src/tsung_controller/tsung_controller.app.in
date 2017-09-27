@@ -17,6 +17,7 @@
                        ts_config_server,
                        ts_config_shell,
                        ts_config_websocket,
+                       ts_config_mainframe,
                        ts_controller_sup,
                        ts_file_server,
                        ts_interaction_server,
