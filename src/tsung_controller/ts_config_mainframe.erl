@@ -1,12 +1,8 @@
 -module(ts_config_mainframe).
 
--export([
-    uuid/0,
-    subst/2,
-    value/1,
-    convert/2,
-    parse_config/2
-]).
+%==============================================================================
+% Includes
+%==============================================================================
 
 -include("ts_profile.hrl").
 -include("ts_config.hrl").
@@ -15,9 +11,33 @@
 -include("xmerl.hrl").
 
 
--define(default_username, <<"test">>).
--define(default_password, <<"secret">>).
+%==============================================================================
+% Exports
+%==============================================================================
 
+-export([
+    uuid/0,
+    subst/2,
+    value/1,
+    convert/2,
+    parse_config/2
+]).
+
+
+%==============================================================================
+% Macros and Constants
+%==============================================================================
+
+-define(DEFAULT_USERNAME, <<"test">>).
+-define(DEFAULT_PASSWORD, <<"secret">>).
+-define(GRAPHQL_QUERY_NAME_RX, "^[ \n\t]*query[ \n\t]*([a-zA-Z][a-zA-Z0-9-_]*)[ \n\t]*\\(").
+-define(GRAPHQL_MUTATION_NAME_RX, "^[ \n\t]*mutation[ \n\t]*([a-zA-Z][a-zA-Z0-9-_]*)[ \n\t]*\\(").
+-define(GRAPHQL_SUBSCRIPTION_NAME_RX, "^[ \n\t]*subscription[ \n\t]*([a-zA-Z][a-zA-Z0-9-_]*)[ \n\t]*\\(").
+
+
+%==============================================================================
+% API Functions
+%==============================================================================
 
 uuid() -> base64:encode(crypto:strong_rand_bytes(16)).
 
@@ -127,23 +147,34 @@ parse_config(_Data, Conf = #config{}) ->
     Conf.
 
 
+%==============================================================================
+% Internal Functions
+%==============================================================================
+
 build_request(connect, Element) ->
     ClientId = xml_attrib(string, Element, client_id, uuid()),
     #mainframe_connect{client_id = ClientId};
 
 build_request(login, Element) ->
-    Username = xml_attrib(string, Element, username, ?default_username),
-    Password = xml_attrib(string, Element, password, ?default_password),
+    Username = xml_attrib(string, Element, username, ?DEFAULT_USERNAME),
+    Password = xml_attrib(string, Element, password, ?DEFAULT_PASSWORD),
     Payload = #mainframe_login{username = Username, password = Password},
     #mainframe_request{id = uuid(), name = <<"login">>, payload = Payload};
 
-build_request(perform, Element) ->
+build_request(graphql, Element) ->
     Vars = parse_variables(Element),
-    {Name, Query} = parse_query(Element),
-    Payload = #mainframe_perform{operation_name = Name,
-                                 query = Query,
-                                 variables = Vars},
-    #mainframe_request{id = uuid(), name = <<"graphql.perform">>, payload = Payload};
+    {Type, Version, Name, Graphql} = parse_graphql(Element),
+    ReqName = case Type of
+      query -> <<"graphql.perform">>;
+      mutation -> <<"graphql.perform">>;
+      subscription -> <<"graphql.subscribe">>
+    end,
+    Payload = #mainframe_graphql{type = Type,
+                                 name = Name,
+                                 graphql = Graphql,
+                                 variables = Vars,
+                                 version = Version},
+    #mainframe_request{id = uuid(), name = ReqName, payload = Payload};
 
 build_request(close, _Element) ->
     #mainframe_close{}.
@@ -158,13 +189,41 @@ parse_variables(Element) ->
     end.
 
 
-parse_query(Element) ->
-    QueryElem = xml_child(Element, query),
-    Name = xml_attrib(string, QueryElem, name),
-    Query = xml_text(string, QueryElem),
+parse_graphql(Element) ->
+    case xml_child(Element, query, null) of
+      null ->
+        case xml_child(Element, mutation, null) of
+          null ->
+            Child = xml_child(Element, subscription),
+            Ver = case xml_attrib(string, Element, version, <<>>) of
+              ?MV{value = <<>>} -> undefined;
+              Value -> Value
+            end,
+            parse_graphql(Child, subscription, Ver, ?GRAPHQL_SUBSCRIPTION_NAME_RX);
+          Child ->
+            parse_graphql(Child, mutation, undefined, ?GRAPHQL_MUTATION_NAME_RX)
+        end;
+      Child ->
+        parse_graphql(Child, query, undefined, ?GRAPHQL_QUERY_NAME_RX)
+    end.
+
+
+parse_graphql(Element, Type, Ver, Regex) ->
+    Name = xml_attrib(string, Element, name, <<>>),
+    Graphql = xml_text(string, Element),
     Post = fun(V) -> re:replace(V, "\n +", "\n", [global, {return, binary}]) end,
-    PostQuery = post_value(Query, Post),
-    {Name, PostQuery}.
+    parse_graphql_name(Name, post_value(Graphql, Post), Type, Ver, Regex).
+
+
+parse_graphql_name(?MV{value = <<>>}, ?MV{value = Data} = Graphql, Type, Ver, Regex) ->
+    ReOpts = [{capture, all_but_first, binary}],
+    case re:run(Data, Regex, ReOpts) of
+      {match, [Name]} -> {Type, Ver, mainframe_value(string, Name), Graphql};
+      _ -> {Type, Ver, mainframe_value(string, "Undefined"), Graphql}
+    end;
+
+parse_graphql_name(?MV{} = Name, Graphql, Type, Ver, _Regex) ->
+    {Type, Ver, Name, Graphql}.
 
 
 parse_variable_value(#xmlText{}) -> ignore;

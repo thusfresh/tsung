@@ -21,12 +21,13 @@
     password
 }).
 
--record(mainframe_perform, {
-    operation_name,
+-record(mainframe_graphql, {
+    type,
+    name,
     variables,
-    query
+    graphql,
+    version
 }).
-
 
 -record(mainframe_value, {
     type = null,

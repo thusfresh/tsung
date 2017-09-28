@@ -7,15 +7,16 @@
 <!ENTITY sleep_duration "1">
 <!ENTITY hostname "localhost">
 <!ENTITY port "4000">
+<!ENTITY protocol "tcp">
 ]
 >
 <tsung loglevel="debug"  dumptraffic="true" version="1.0">
   <clients>
-    <client host="&hostname;" use_controller_vm="true" maxusers="500" />
+    <client host="localhost" use_controller_vm="true" maxusers="500" />
   </clients>
 
   <servers>
-    <server host="&hostname;" port="&port;" type="tcp" />
+    <server host="&hostname;" port="&port;" type="&protocol;" />
   </servers>
 
   <load>
@@ -35,10 +36,6 @@
         <var name="avatar_size" />
       </setdynvars>
 
-      <setdynvars sourcetype="value" value="supportsQuickMenus">
-        <var name="flag" />
-      </setdynvars>
-
       <transaction name="connect">
         <request>
           <mainframe type="connect"/>
@@ -53,14 +50,15 @@
       </transaction>
 
       <transaction name="loading">
+
         <request subst="true">
-          <dyn_variable name="display_name" jsonpath="data.session.actor.displayName"/>
-          <mainframe type="perform">
+          <dyn_variable name="actor_id" jsonpath="data.session.actor.id"/>
+          <mainframe type="graphql">
             <variables>
               <number name="avatarSize">%%_avatar_size%%</number>
               <number name="botLogoHeight">26</number>
             </variables>
-            <query name="RootContainerQuery">
+            <query>
               query RootContainerQuery($avatarSize: Int!, $botLogoHeight: Int!) {
                 session {
                   ...RootContainer_session
@@ -94,7 +92,7 @@
                   }
                   uref
                   flags {
-                    %%_flag%%
+                    supportsQuickMenus
                     supportsMentions
                     supportsSubscriptions
                   }
@@ -108,7 +106,7 @@
         </request>
 
         <request>
-          <mainframe type="perform">
+          <mainframe type="graphql">
             <variables>
               <list name="keys">
                 <string>hasCompletedOnboarding</string>
@@ -119,7 +117,7 @@
                 <string>helper_todo_basic</string>
               </list>
             </variables>
-            <query name="LoginStorage">
+            <query>
               query LoginStorage ($keys: [String]!) {
                 values: getStorageKeys(keys: $keys)
               }
@@ -127,12 +125,16 @@
           </mainframe>
         </request>
 
-        <request>
-          <mainframe type="perform">
+        <request subst="true">
+          <dyn_variable name="account_id" jsonpath="data.session.actor.id"/>
+          <dyn_variable name="cubicle_id" jsonpath="data.session.cubicle.id"/>
+          <dyn_variable name="org_id" jsonpath="data.session.memberships[0].actor.id"/>
+          <dyn_variable name="space_id" jsonpath="data.session.memberships[0].joinedSpaces[0].conversation.id"/>
+          <mainframe type="graphql">
             <variables>
-              <number name="avatarSize">50</number>
+              <number name="avatarSize">%%_avatar_size%%</number>
             </variables>
-            <query name="HomeScreenQuery">
+            <query>
               query HomeScreenQuery($avatarSize: Int!) {
                 session {
                   ...HomeScreen_session
@@ -197,8 +199,8 @@
                         mentioned
                         unread
                       }
-                    subject
-                    id
+                      subject
+                      id
                     }
                   }
                 }
@@ -548,34 +550,35 @@
           </mainframe>
         </request>
 
-        <request>
-          <mainframe type="perform">
+        <request subst="true">
+          <mainframe type="graphql">
             <variables>
               <object name="input">
-                <string name="clientMutationId">presence1504735094462</string>
                 <string name="state">AWAY</string>
+                <string name="clientMutationId">%%ts_mainframe:uuid%%</string>
               </object>
             </variables>
-            <query name="UpdatePresence">
+            <mutation>
               mutation UpdatePresence ($input: UpdatePresenceInput!) {
                 updatePresence (input: $input) {
                   clientMutationId
                 }
               }
-            </query>
+            </mutation>
           </mainframe>
         </request>
 
-        <request>
-          <mainframe type="perform">
+        <request subst="true">
+          <dyn_variable name="mailbox_id" jsonpath="data.session.mailbox.id"/>
+          <mainframe type="graphql">
             <variables>
-              <number name="avatarSize">40</number>
+              <number name="avatarSize">%%_avatar_size%%</number>
               <string name="conversationType">DEFAULT</string>
               <number name="count">10</number>
               <null name="cursor"/>
               <string name="mailboxType">INBOX</string>
             </variables>
-            <query name="MailboxScreenQuery">
+            <query>
               query MailboxScreenQuery($avatarSize: Int!, $conversationType: ConversationType!, $count: Int!, $cursor: String, $mailboxType: MailboxType!) {
                 session {
                   ...MailboxView_session
@@ -663,6 +666,995 @@
             </query>
           </mainframe>
         </request>
+      </transaction>
+
+
+      <transaction name="subscriptions">
+
+        <request subst="true">
+          <mainframe type="graphql">
+            <variables>
+              <number name="avatarSize">%%_avatar_size%%</number>
+              <number name="botLogoHeight">26</number>
+              <object name="input">
+                <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
+              </object>
+            </variables>
+            <subscription>
+              subscription RootContainerBotChangedSubscription($avatarSize: Int!, $botLogoHeight: Int!, $input: BotChangedInput!) {
+                botChanged(input: $input) {
+                  session {
+                    enabledBots {
+                      avatarUrl(size: $avatarSize)
+                      logoUrl(height: $botLogoHeight)
+                      color
+                      displayId
+                      displayName
+                      id
+                      menus {
+                        iconUrl(size: $avatarSize)
+                        payload
+                        title
+                        type
+                        url
+                      }
+                      uref
+                      flags {
+                        supportsQuickMenus
+                        supportsMentions
+                        supportsSubscriptions
+                      }
+                    }
+                    id
+                  }
+                }
+              }
+            </subscription>
+          </mainframe>
+        </request>
+
+        <request subst="true">
+          <mainframe type="graphql">
+            <variables>
+              <object name="input">
+                <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
+              </object>
+            </variables>
+            <subscription>
+              subscription RootContainerNotificationsSubscription($input: NotificationInput!) {
+                notifications(input: $input) {
+                  notificationMessage {
+                    body
+                    conversationId
+                    title
+                  }
+                  session {
+                    counts {
+                      badgeCount
+                    }
+                    id
+                  }
+                }
+              }
+            </subscription>
+          </mainframe>
+        </request>
+
+        <request subst="true">
+          <mainframe type="graphql">
+            <variables>
+              <number name="avatarSize">%%_avatar_size%%</number>
+              <object name="input">
+                <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
+              </object>
+            </variables>
+            <subscription>
+              subscription HomeScreenMembershipChangedSubscription($avatarSize: Int!, $input: MembershipChangedInput!) {
+                membershipChanged(input: $input) {
+                  session {
+                    ...HomeScreen_session
+                    id
+                  }
+                }
+              }
+
+              fragment HomeScreen_session on Session {
+                ...AccountSection_session
+                ...BotSection_session
+                ...DirectMessageSection_session
+                ...OrgSection_session
+              }
+
+              fragment AccountSection_session on Session {
+                ...CubicleItem_session
+                ...InboxItem_session
+                ...ToDoItem_session
+                actor {
+                  ...SelfHeader_actor
+                  id
+                }
+                counts {
+                  incomingAssignedActions
+                  incompleteAssignedActions
+                  mentionedInbox
+                  unreadInbox
+                }
+                cubicle {
+                  flags {
+                    mentioned
+                    unread
+                    unseenActions
+                  }
+                  id
+                }
+                ownOrgs: memberships(filter: ME) {
+                  ...AccountSection_ownOrg
+                  ...SelfHeader_org
+                  id
+                  spaces(filter: JOINED) {
+                    ...SpaceItem_space
+                    conversationId
+                    conversation {
+                      flags {
+                        mentioned
+                        unread
+                      }
+                      subject
+                      id
+                    }
+                  }
+                }
+                guestMemberships: memberships(filter: GUEST) {
+                  ...AccountSection_guestOrg
+                  id
+                  spaces(filter: JOINED) {
+                    ...SpaceItem_space
+                    conversationId
+                    conversation {
+                      flags {
+                        mentioned
+                        unread
+                      }
+                      subject
+                      id
+                    }
+                  }
+                }
+              }
+
+              fragment BotSection_session on Session {
+                id
+                actor {
+                  id
+                }
+                counts {
+                  unreadBots
+                }
+                botMailbox(first: 10) {
+                  pageInfo {
+                    hasNextPage
+                    endCursor
+                    hasPreviousPage
+                    startCursor
+                  }
+                  edges {
+                    node {
+                      ...BotItem_actor
+                      conversation {
+                        id
+                        flags {
+                          mentioned
+                          unread
+                        }
+                      }
+                      id
+                      __typename
+                    }
+                    cursor
+                  }
+                }
+              }
+
+              fragment DirectMessageSection_session on Session {
+                id
+                actor {
+                  id
+                }
+                counts {
+                  mentionedDirect
+                  unreadDirect
+                }
+                contactMailbox(first: 10) {
+                  pageInfo {
+                    hasNextPage
+                    endCursor
+                    hasPreviousPage
+                    startCursor
+                  }
+                  edges {
+                    node {
+                      id
+                      actor {
+                        ...DirectMessageItem_actor
+                        ... on Node {
+                          id
+                        }
+                        id
+                      }
+                      direct {
+                        ...DirectMessageItem_conversation
+                        id
+                        flags {
+                          mentioned
+                          unread
+                        }
+                      }
+                      __typename
+                    }
+                    cursor
+                  }
+                }
+              }
+
+              fragment OrgSection_session on Session {
+                memberships(filter: MEMBER) {
+                  ...AvailableSpaces_org
+                  ...OrgHeader_org
+                  ...HomeHelperTeamInvite_org
+                  actor {
+                    __typename
+                    displayId
+                    ... on Node {
+                      id
+                    }
+                  }
+                  availableSpaces: spaces(filter: AVAILABLE) {
+                    conversationId
+                  }
+                  id
+                  joinedSpaces: spaces(filter: JOINED) {
+                    ...SpaceItem_space
+                    conversationId
+                    conversation {
+                      flags {
+                        mentioned
+                        unread
+                      }
+                      subject
+                      id
+                    }
+                  }
+                  selfRoles {
+                    isAdmin
+                    isGuest
+                    isPending
+                  }
+                }
+              }
+
+              fragment AvailableSpaces_org on Org {
+                spaces(filter: AVAILABLE) {
+                  ...AvailableSpaces_space
+                  conversationId
+                  name
+                }
+              }
+
+              fragment OrgHeader_org on Org {
+                ...OrgMetrics_org
+                id
+                memberCount
+                actor {
+                  __typename
+                  ...SimpleAvatarAccountHome_actor
+                  displayId
+                  displayName
+                    ... on Node {
+                    id
+                  }
+                }
+                adminSettings {
+                  pendingCount
+                }
+                selfRoles {
+                  isAdmin
+                  isPending
+                }
+              }
+
+              fragment HomeHelperTeamInvite_org on Org {
+                ...OrgMetrics_org
+                adminSettings {
+                  inviteUrl
+                  joinsRestricted
+                  invitedEmails
+                }
+                id
+              }
+
+              fragment SpaceItem_space on OrgSpace {
+                conversationId
+                conversation {
+                  ...SimpleAvatarHome_conversation
+                  flags {
+                    mentioned
+                    unread
+                    unseenActions
+                  }
+                  moderatorSettings {
+                    pendingParticipantsCount
+                  }
+                  subject
+                  id
+                }
+              }
+
+              fragment SimpleAvatarHome_conversation on Conversation {
+                avatarUrl(size: $avatarSize)
+                subject
+              }
+
+              fragment OrgMetrics_org on Org {
+                actor {
+                  __typename
+                  displayId
+                  displayName
+                  ... on NativeActor {
+                    subtype
+                  }
+                  ... on Node {
+                    id
+                  }
+                }
+                adminSettings {
+                  guests {
+                    actor {
+                      __typename
+                      ... on Node {
+                        id
+                      }
+                    }
+                  }
+                }
+                roster {
+                  actor {
+                    __typename
+                    ... on Node {
+                      id
+                    }
+                  }
+                }
+                selfRoles {
+                  isAdmin
+                  isMaster
+                  isGuest
+                  isPending
+                }
+                metricsSpaces: spaces {
+                  conversationId
+                }
+              }
+
+              fragment SimpleAvatarAccountHome_actor on Actor {
+                displayId
+                displayName
+                avatarUrl(size: $avatarSize)
+              }
+
+              fragment AvailableSpaces_space on OrgSpace {
+                conversationId
+                conversation {
+                  ...SimpleAvatarHome_conversation
+                  subject
+                  id
+                }
+              }
+
+              fragment DirectMessageItem_actor on Actor {
+                ...SimpleAvatarAccountHome_actor
+                ... on Node {
+                  id
+                }
+                displayId
+                displayName
+              }
+
+              fragment DirectMessageItem_conversation on Conversation {
+                id
+                flags {
+                  mentioned
+                  unseenActions
+                  unread
+                }
+              }
+
+              fragment BotItem_actor on BotActor {
+                ...SimpleAvatarAccountHome_actor
+                conversation {
+                  id
+                  flags {
+                    mentioned
+                    unseenActions
+                    unread
+                  }
+                }
+                displayId
+                displayName
+                id
+              }
+
+              fragment CubicleItem_session on Session {
+                cubicle {
+                  id
+                  flags {
+                    mentioned
+                    unread
+                    unseenActions
+                  }
+                }
+              }
+
+              fragment InboxItem_session on Session {
+                counts {
+                  mentionedInbox
+                  unreadInbox
+                }
+              }
+
+              fragment ToDoItem_session on Session {
+                counts {
+                  incomingAssignedActions
+                  incompleteAssignedActions
+                }
+              }
+
+              fragment SelfHeader_actor on Actor {
+                ...SimpleAvatarAccountHome_actor
+                displayId
+                displayName
+                ... on Node {
+                  id
+                }
+              }
+
+              fragment AccountSection_ownOrg on Org {
+                ...SelfHeader_org
+                id
+                selfRoles {
+                  isGuest
+                }
+                spaces(filter: JOINED) {
+                  ...AccountSection_joinedSpace
+                }
+              }
+
+              fragment SelfHeader_org on Org {
+                id
+              }
+
+              fragment AccountSection_guestOrg on Org {
+                actor {
+                  __typename
+                  displayId
+                  ... on Node {
+                    id
+                  }
+                }
+                id
+                selfRoles {
+                  isGuest
+                }
+                spaces(filter: JOINED) {
+                  ...AccountSection_joinedSpace
+                }
+              }
+
+              fragment AccountSection_joinedSpace on OrgSpace {
+                ...SpaceItem_space
+                conversationId
+                conversation {
+                  flags {
+                    mentioned
+                    unread
+                    unseenActions
+                  }
+                  subject
+                  id
+                }
+              }
+            </subscription>
+          </mainframe>
+        </request>
+
+        <request subst="true">
+          <mainframe type="graphql">
+            <variables>
+              <number name="avatarSize">%%_avatar_size%%</number>
+              <object name="input">
+                <null name="cursor"/>
+                <string name="mailboxId">%%_mailbox_id%%</string>
+                <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
+              </object>
+            </variables>
+            <subscription>
+              subscription MailboxViewChangedSubscription($avatarSize: Int!, $input: MailboxChangedInput!) {
+                mailboxChanged(input: $input) {
+                  added {
+                    node {
+                      ...ListRow_conversation
+                      id
+                    }
+                  }
+                  bumped {
+                    node {
+                      ...ListRow_conversation
+                        id
+                      }
+                    }
+                    changed {
+                      ...ListRow_conversation
+                      id
+                  }
+                  removed
+                }
+              }
+
+              fragment ListRow_conversation on Conversation {
+                ...SimpleAvatarConvo_conversation
+                id
+                subject
+                type
+                lastRelevantTime
+                avatarUrl(size: $avatarSize)
+                flags {
+                  unread
+                  mentioned
+                  unseenActions
+                }
+                participants(all: true) {
+                  __typename
+                  actor {
+                    __typename
+                    ...SimpleAvatarAccount_actor
+                    ... on Node {
+                      id
+                    }
+                    displayId
+                    displayName
+                  }
+                }
+                lastRelevantMessage {
+                  id
+                  previewBody
+                  actor {
+                    __typename
+                    displayId
+                    displayName
+                    ...SimpleAvatarAccount_actor
+                    ... on Node {
+                      id
+                    }
+                  }
+                }
+              }
+
+              fragment SimpleAvatarConvo_conversation on Conversation {
+                avatarUrl(size: $avatarSize)
+                subject
+              }
+
+              fragment SimpleAvatarAccount_actor on Actor {
+                displayId
+                displayName
+                avatarUrl(size: $avatarSize)
+              }
+            </subscription>
+          </mainframe>
+        </request>
+
+        <request subst="true">
+          <mainframe type="graphql">
+            <variables>
+              <number name="avatarSize">%%_avatar_size%%</number>
+              <object name="input">
+                <string name="accountId">%%_account_id%%</string>
+                <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
+              </object>
+            </variables>
+            <subscription>
+              subscription AccountSectionSelfJoinedSpacesChangedSubscription($avatarSize: Int!, $input: JoinedSpacesChangedInput!) {
+                joinedSpacesChanged(input: $input) {
+                  org {
+                  ...AccountSection_ownOrg
+                    id
+                  }
+                }
+              }
+
+              fragment AccountSection_ownOrg on Org {
+                ...SelfHeader_org
+                id
+                selfRoles {
+                  isGuest
+                }
+                spaces(filter: JOINED) {
+                  ...AccountSection_joinedSpace
+                }
+              }
+
+              fragment SelfHeader_org on Org {
+                id
+              }
+
+              fragment AccountSection_joinedSpace on OrgSpace {
+                ...SpaceItem_space
+                conversationId
+                conversation {
+                  flags {
+                    mentioned
+                    unread
+                    unseenActions
+                  }
+                  subject
+                  id
+                }
+              }
+
+              fragment SpaceItem_space on OrgSpace {
+                conversationId
+                conversation {
+                  ...SimpleAvatarHome_conversation
+                  flags {
+                    mentioned
+                    unread
+                    unseenActions
+                  }
+                  moderatorSettings {
+                    pendingParticipantsCount
+                  }
+                  subject
+                  id
+                }
+              }
+
+              fragment SimpleAvatarHome_conversation on Conversation {
+                avatarUrl(size: $avatarSize)
+                subject
+              }
+            </subscription>
+          </mainframe>
+        </request>
+
+        <request subst="true">
+          <mainframe type="graphql">
+            <variables>
+              <number name="avatarSize">%%_avatar_size%%</number>
+              <object name="input">
+                <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
+              </object>
+            </variables>
+            <subscription>
+              subscription BotSectionBotMailboxChangedSubscription($avatarSize: Int!, $input: BotMailboxChangedInput!) {
+                botMailboxChanged(input: $input) {
+                  added {
+                    node {
+                      ...BotSection_bot
+                      id
+                    }
+                  }
+                  bumped {
+                    node {
+                      ...BotSection_bot
+                      id
+                    }
+                  }
+                  changed {
+                    ...BotSection_bot
+                    id
+                  }
+                  removed
+                }
+              }
+
+              fragment BotSection_bot on BotActor {
+                ...BotItem_actor
+                conversation {
+                  id
+                  flags {
+                    mentioned
+                    unseenActions
+                    unread
+                  }
+                }
+                id
+              }
+
+              fragment BotItem_actor on BotActor {
+                ...SimpleAvatarAccountHome_actor
+                conversation {
+                  id
+                  flags {
+                    mentioned
+                    unseenActions
+                    unread
+                  }
+                }
+                displayId
+                displayName
+                id
+              }
+
+              fragment SimpleAvatarAccountHome_actor on Actor {
+                displayId
+                displayName
+                avatarUrl(size: $avatarSize)
+              }
+            </subscription>
+          </mainframe>
+        </request>
+
+        <request subst="true">
+          <mainframe type="graphql">
+            <variables>
+              <number name="avatarSize">%%_avatar_size%%</number>
+              <object name="input">
+                <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
+              </object>
+            </variables>
+            <subscription>
+              subscription DirectMessageSectionNewContactSubscription($avatarSize: Int!, $input: NewContactInput!) {
+                newContact(input: $input) {
+                  edge {
+                    __typename
+                    node {
+                      __typename
+                      id
+                      ...DirectMessageSection_contact
+                    }
+                  }
+                }
+              }
+
+              fragment DirectMessageSection_contact on ContactConversation {
+                id
+                actor {
+                  ...DirectMessageItem_actor
+                  ... on Node {
+                    id
+                  }
+                  id
+                }
+                direct {
+                  ...DirectMessageItem_conversation
+                  id
+                  flags {
+                    mentioned
+                    unseenActions
+                    unread
+                  }
+                }
+              }
+
+              fragment DirectMessageItem_actor on Actor {
+                ...SimpleAvatarAccountHome_actor
+                ... on Node {
+                  id
+                }
+                displayId
+                displayName
+              }
+
+              fragment DirectMessageItem_conversation on Conversation {
+                id
+                flags {
+                  mentioned
+                  unseenActions
+                  unread
+                }
+              }
+
+              fragment SimpleAvatarAccountHome_actor on Actor {
+                displayId
+                displayName
+                avatarUrl(size: $avatarSize)
+              }
+            </subscription>
+          </mainframe>
+        </request>
+
+        <request subst="true">
+          <mainframe type="graphql">
+            <variables>
+              <number name="avatarSize">%%_avatar_size%%</number>
+              <object name="input">
+                <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
+              </object>
+            </variables>
+            <subscription>
+              subscription DirectMessageSectionContactMailboxChangedSubscription($avatarSize: Int!, $input: ContactMailboxChangedInput!) {
+                contactMailboxChanged(input: $input) {
+                  added {
+                    node {
+                    id
+                      ...DirectMessageSection_contact
+                    }
+                  }
+                  bumped {
+                    node {
+                      id
+                      ...DirectMessageSection_contact
+                    }
+                  }
+                  changed {
+                    ...DirectMessageSection_contact
+                    id
+                  }
+                  removed
+                }
+              }
+
+              fragment DirectMessageSection_contact on ContactConversation {
+                id
+                actor {
+                  ...DirectMessageItem_actor
+                  ... on Node {
+                    id
+                  }
+                  id
+                }
+                direct {
+                  ...DirectMessageItem_conversation
+                  id
+                  flags {
+                    mentioned
+                    unseenActions
+                    unread
+                  }
+                }
+              }
+
+              fragment DirectMessageItem_actor on Actor {
+                ...SimpleAvatarAccountHome_actor
+                ... on Node {
+                  id
+                }
+                displayId
+                displayName
+              }
+
+              fragment DirectMessageItem_conversation on Conversation {
+                id
+                flags {
+                  mentioned
+                  unseenActions
+                  unread
+                }
+              }
+
+              fragment SimpleAvatarAccountHome_actor on Actor {
+                displayId
+                displayName
+                avatarUrl(size: $avatarSize)
+              }
+            </subscription>
+          </mainframe>
+        </request>
+
+        <request subst="true">
+          <mainframe type="graphql">
+            <variables>
+              <number name="avatarSize">%%_avatar_size%%</number>
+              <object name="input">
+                <string name="actorId">%%_actor_id%%</string>
+                <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
+              </object>
+            </variables>
+            <subscription>
+              subscription SelfHeaderProfileChangedSubscription($avatarSize: Int!, $input: ProfileChangedInput!) {
+                profileChanged(input: $input) {
+                  actor {
+                    ...SelfHeader_actor
+                    id
+                  }
+                }
+              }
+
+              fragment SelfHeader_actor on Actor {
+                ...SimpleAvatarAccountHome_actor
+                displayId
+                displayName
+                ... on Node {
+                  id
+                }
+              }
+
+              fragment SimpleAvatarAccountHome_actor on Actor {
+                displayId
+                displayName
+                avatarUrl(size: $avatarSize)
+              }
+            </subscription>
+          </mainframe>
+        </request>
+
+        <request subst="true">
+          <mainframe type="graphql">
+            <variables>
+              <object name="input">
+                <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
+              </object>
+            </variables>
+            <subscription>
+              subscription InboxItemNotificationsSubscription($input: NotificationInput!) {
+                notifications(input: $input) {
+                  session {
+                  ...InboxItem_session
+                  id
+                  }
+                }
+              }
+
+              fragment InboxItem_session on Session {
+                counts {
+                  mentionedInbox
+                  unreadInbox
+                }
+              }
+            </subscription>
+          </mainframe>
+        </request>
+
+        <request subst="true">
+          <mainframe type="graphql">
+            <variables>
+              <object name="input">
+                <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
+              </object>
+            </variables>
+            <subscription>
+              subscription ToDoItemNotificationSubscription($input: NotificationInput!) {
+                notifications(input: $input) {
+                  session {
+                    ...ToDoItem_session
+                    id
+                  }
+                }
+              }
+
+              fragment ToDoItem_session on Session {
+                counts {
+                  incomingAssignedActions
+                  incompleteAssignedActions
+                }
+              }
+            </subscription>
+          </mainframe>
+        </request>
+
+        <request subst="true">
+          <mainframe type="graphql">
+            <variables>
+              <object name="input">
+                <string name="conversationId">%%_cubicle_id%%</string>
+                <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
+              </object>
+            </variables>
+            <subscription>
+              subscription CubicleItemFlagsChangedSubscription($input: ConversationFlagsChangedInput!) {
+                conversationFlagsChanged(input: $input) {
+                  conversation {
+                    flags {
+                      mentioned
+                      unread
+                    }
+                    id
+                  }
+                }
+              }
+            </subscription>
+          </mainframe>
+        </request>
+
       </transaction>
 
       <transaction name="disconnect">

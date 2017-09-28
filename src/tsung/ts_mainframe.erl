@@ -2,11 +2,28 @@
 
 -behavior(ts_plugin).
 
+
+%==============================================================================
+% Includes
+%==============================================================================
+
 -include("ts_profile.hrl").
 -include("ts_config.hrl").
 -include("ts_mainframe.hrl").
 
--export([add_dynparams/4,
+
+%==============================================================================
+% Exports
+%==============================================================================
+
+% Tsung Configuration Callback Functions
+-export([
+  uuid/1
+]).
+
+% Behaviour ts_plugin Functions
+-export([
+  add_dynparams/4,
   get_message/2,
   session_defaults/0,
   parse/2,
@@ -18,6 +35,10 @@
 ).
 
 
+%==============================================================================
+% Macros and Constants
+%==============================================================================
+
 -define(OP_CONT, 0).
 -define(OP_TEXT, 1).
 -define(OP_BIN, 2).
@@ -27,6 +48,18 @@
 
 -define(WS_PATH, "/api/ws?client_id=~s&client_version=1.13.2&os_version=4.4.0-94-generic&platform=linux&protocol_version=9&utc_offset=-120").
 
+
+%==============================================================================
+% Tsung Configuration Callback Functions
+%==============================================================================
+
+uuid(_) -> binary_to_list(ts_config_mainframe:uuid()).
+
+
+
+%==============================================================================
+% Behaviour ts_plugin Functions
+%==============================================================================
 
 session_defaults() ->
     {ok, true, true}.
@@ -50,22 +83,25 @@ dump(A, B) ->
     ts_plugin:dump(A, B).
 
 
-get_message(#mainframe_connect{client_id = ClientId},
+get_message(#mainframe_connect{client_id = ClientId} = Req,
             #state_rcv{session = Sess, host = Host}) ->
+    NewSess = update_metrics(Req, Sess),
     Path = websocket_path(?VALUE(ClientId)),
     {Msg, Accept} = websocket:get_handshake(Host, Path, "", "13", ""),
-    {Msg, Sess#mainframe_session{status = waiting_handshake, accept = Accept}};
+    {Msg, NewSess#mainframe_session{status = waiting_handshake, accept = Accept}};
 
-get_message(#mainframe_request{id = Id, name = Name, payload = Payload},
+get_message(#mainframe_request{id = Id, name = Name, payload = Payload} = Req,
             #state_rcv{session = Sess})
   when Sess#mainframe_session.status == connected ->
+    NewSess = update_metrics(Req, Sess),
     Msg = prepare_request(Id, Name, Payload),
     ?DebugF("Mainframe websocket sending: ~p~n", [Msg]),
-    {websocket:encode_text(Msg), Sess};
+    {websocket:encode_text(Msg), NewSess};
 
-get_message(#mainframe_close{}, #state_rcv{session = Sess})
+get_message(#mainframe_close{} = Req, #state_rcv{session = Sess})
   when Sess#mainframe_session.status == connected ->
-    {websocket:encode_close(<<"close">>), Sess}.
+    NewSess = update_metrics(Req, Sess),
+    {websocket:encode_close(<<"close">>), NewSess}.
 
 
 parse(closed, State) ->
@@ -109,7 +145,8 @@ parse(Data, State = #state_rcv{acc = [], session = Sess, request = Req})
           {error, _Reason} ->
             ?DebugF("Mainframe protocol error received: ~p~n", [_Reason]),
             ts_mon_cache:add({count, mainframe_protocol_error}),
-            {State#state_rcv{ack_done = true, acc = Left}, [], true}
+            ?DebugF(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>~n~p~n", [State]),
+            {State#state_rcv{count=0, ack_done = true, acc = Left}, [], true}
         end;
       {error, _Reason, _FrameData, Left} ->
         ?DebugF("Mainframe websocket received: ~p~n", [_FrameData]),
@@ -150,16 +187,9 @@ add_dynparams(_Bool, _DynData, Param, _HostData) ->
     Param.
 
 
-subst_params(Param = #mainframe_login{username = User, password = Pass}, DynVars) ->
-    NewUser = ?SUBST(User, DynVars),
-    NewPass = ?SUBST(Pass, DynVars),
-    Param#mainframe_login{username = NewUser, password = NewPass};
-
-subst_params(Param = #mainframe_perform{query = Query, variables = Vars}, DynVars) ->
-    NewQuery = ?SUBST(Query, DynVars),
-    NewVars = ?SUBST(Vars, DynVars),
-    Param#mainframe_perform{query = NewQuery, variables = NewVars}.
-
+%==============================================================================
+% Internal Functions
+%==============================================================================
 
 websocket_path(ClientId) ->
     EncodedId = http_uri:encode(ClientId),
@@ -198,20 +228,68 @@ format_request(Id, Name, Payload) ->
     iolist_to_binary(mochijson2:encode(Json)).
 
 
+update_metrics(#mainframe_connect{}, Sess) ->
+    ts_mon_cache:add({count, mainframe_connect}),
+    Sess;
+
+update_metrics(#mainframe_request{payload = Payload}, Sess) ->
+  update_request_metrics(Payload, Sess);
+
+update_metrics(#mainframe_close{}, Sess) ->
+    ts_mon_cache:add({count, mainframe_close}),
+    Sess.
+
+
+update_request_metrics(#mainframe_login{}, Sess) ->
+    ts_mon_cache:add({count, mainframe_login}),
+    Sess;
+
+update_request_metrics(#mainframe_graphql{type = query}, Sess) ->
+    ts_mon_cache:add([{count, mainframe_graphql},
+                      {count, mainframe_graphql_query}]),
+    Sess;
+
+update_request_metrics(#mainframe_graphql{type = mutation}, Sess) ->
+    ts_mon_cache:add([{count, mainframe_graphql},
+                      {count, mainframe_graphql_mutation}]),
+    Sess;
+
+update_request_metrics(#mainframe_graphql{type = subscription}, Sess) ->
+    ts_mon_cache:add([{count, mainframe_graphql},
+                      {count, mainframe_graphql_subscription}]),
+    Sess.
+
+
 prepare_request(Id, Name, Params) ->
     Payload = prepare_payload(Params),
     format_request(Id, Name, Payload).
 
 
+subst_params(Param = #mainframe_login{username = User, password = Pass}, DynVars) ->
+    NewUser = ?SUBST(User, DynVars),
+    NewPass = ?SUBST(Pass, DynVars),
+    Param#mainframe_login{username = NewUser, password = NewPass};
+
+subst_params(Param = #mainframe_graphql{name = Name, graphql = Graphql, variables = Vars}, DynVars) ->
+    NewName = ?SUBST(Name, DynVars),
+    NewGraphql = ?SUBST(Graphql, DynVars),
+    NewVars = ?SUBST(Vars, DynVars),
+    Param#mainframe_graphql{name = NewName, graphql = NewGraphql, variables = NewVars}.
+
+
 prepare_payload(#mainframe_login{username = User, password = Pass}) ->
-    ts_mon_cache:add({count, mainframe_login}),
     [{username, ?VALUE(User)}, {password, ?VALUE(Pass)}];
 
-prepare_payload(#mainframe_perform{operation_name = Name, query = Query, variables = Vars}) ->
-    ts_mon_cache:add({count, mainframe_graphql_perform}),
+prepare_payload(#mainframe_graphql{name = Name, graphql = Graphql, variables = Vars, version = undefined}) ->
     [{operation_name, ?VALUE(Name)},
-     {query, ?VALUE(Query)},
-     {variables, ?VALUE(Vars)}].
+     {query, ?VALUE(Graphql)},
+     {variables, ?VALUE(Vars)}];
+
+prepare_payload(#mainframe_graphql{name = Name, graphql = Graphql, variables = Vars, version = Ver}) ->
+    [{operation_name, ?VALUE(Name)},
+     {query, ?VALUE(Graphql)},
+     {variables, ?VALUE(Vars)},
+     {version, ?VALUE(Ver)}].
 
 
 handle_response(#mainframe_request{id = Id, name = Name},

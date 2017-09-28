@@ -383,16 +383,25 @@ repeat | if | change_type | foreach | set_option | interaction | abort )*>
     subprotocols CDATA ""
     path CDATA "/" >
 
-<!ELEMENT mainframe (query | (variables, query)) >
+<!ELEMENT mainframe ((query | mutation | subscription) | (variables, (query | mutation | subscription))) >
 <!ATTLIST mainframe
-    type (connect | login | perform | close) #REQUIRED
+    type (connect | login | graphql | close) #REQUIRED
     client_id CDATA #IMPLIED
     username CDATA  #IMPLIED
     password CDATA  #IMPLIED
 >
 <!ELEMENT query (#PCDATA) >
 <!ATTLIST query
-    name CDATA  #REQUIRED
+    name CDATA  #IMPLIED
+>
+<!ELEMENT mutation (#PCDATA) >
+<!ATTLIST mutation
+    name CDATA  #IMPLIED
+>
+<!ELEMENT subscription (#PCDATA) >
+<!ATTLIST subscription
+    name CDATA  #IMPLIED
+    version CDATA  #IMPLIED
 >
 <!ELEMENT variables (number | boolean | string | list | object | null)* >
 <!ELEMENT number (#PCDATA) >
