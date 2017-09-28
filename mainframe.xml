@@ -27,6 +27,18 @@
   <sessions>
     <session name="foo" probability="100" type="ts_mainframe" bidi="true">
 
+      <setdynvars sourcetype="value" value="ryan">
+        <var name="username" />
+      </setdynvars>
+
+      <setdynvars sourcetype="value" value="50">
+        <var name="avatar_size" />
+      </setdynvars>
+
+      <setdynvars sourcetype="value" value="supportsQuickMenus">
+        <var name="flag" />
+      </setdynvars>
+
       <transaction name="connect">
         <request>
           <mainframe type="connect"/>
@@ -34,20 +46,18 @@
       </transaction>
 
       <transaction name="login">
-        <request>
-          <mainframe type="login" username="sebastien" password="secret"/>
+        <request subst="true">
+          <dyn_variable name="uref" jsonpath="uref"/>
+          <mainframe type="login" username="%%_username%%" password="secret"/>
         </request>
       </transaction>
 
-
-      <!-- <thinktime value="&sleep_duration;" random="false"/> -->
-
-
       <transaction name="loading">
         <request subst="true">
+          <dyn_variable name="display_name" jsonpath="data.session.actor.displayName"/>
           <mainframe type="perform">
             <variables>
-              <number name="avatarSize">50</number>
+              <number name="avatarSize">%%_avatar_size%%</number>
               <number name="botLogoHeight">26</number>
             </variables>
             <query name="RootContainerQuery">
@@ -84,7 +94,7 @@
                   }
                   uref
                   flags {
-                    supportsQuickMenus
+                    %%_flag%%
                     supportsMentions
                     supportsSubscriptions
                   }
@@ -97,7 +107,7 @@
           </mainframe>
         </request>
 
-        <request subst="true">
+        <request>
           <mainframe type="perform">
             <variables>
               <list name="keys">
@@ -117,7 +127,7 @@
           </mainframe>
         </request>
 
-        <request subst="true">
+        <request>
           <mainframe type="perform">
             <variables>
               <number name="avatarSize">50</number>
@@ -538,7 +548,7 @@
           </mainframe>
         </request>
 
-        <request subst="true">
+        <request>
           <mainframe type="perform">
             <variables>
               <object name="input">
@@ -556,7 +566,7 @@
           </mainframe>
         </request>
 
-        <request subst="true">
+        <request>
           <mainframe type="perform">
             <variables>
               <number name="avatarSize">40</number>

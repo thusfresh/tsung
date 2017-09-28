@@ -32,13 +32,13 @@ session_defaults() ->
     {ok, true, true}.
 
 
-decode_buffer(Buffer, Sess) ->
-    ?LOGF("MMMMMMMMMM ts_mainframe:decode_buffer(Buffer, Sess)~nBuffer: ~p~nSess: ~p", [Buffer, Sess], ?INFO),
-    case websocket:decode(Buffer) of
-      more -> <<>>;
-      {_Opcode, Payload, _Rest} ->
-        ?LOGF(">>>>>>>>>> ts_mainframe:decode_buffer~nPayload: ~p", [Payload], ?INFO),
-        Payload
+decode_buffer(Buffer, _Sess) ->
+    case decode_frame(Buffer) of
+      {ok, Packet, _, _} ->
+        Payload = extract_payload(Packet),
+        % Tsung do not support pre-decoded JSON :/
+        iolist_to_binary(mochijson2:encode(Payload));
+      _ -> <<>>
     end.
 
 
@@ -52,18 +52,16 @@ dump(A, B) ->
 
 get_message(#mainframe_connect{client_id = ClientId},
             #state_rcv{session = Sess, host = Host}) ->
-    Path = websocket_path(ClientId),
+    Path = websocket_path(?VALUE(ClientId)),
     {Msg, Accept} = websocket:get_handshake(Host, Path, "", "13", ""),
-    {Msg, Sess#mainframe_session{status = waiting_handshake,
-    accept = Accept}};
+    {Msg, Sess#mainframe_session{status = waiting_handshake, accept = Accept}};
 
 get_message(#mainframe_request{id = Id, name = Name, payload = Payload},
             #state_rcv{session = Sess})
   when Sess#mainframe_session.status == connected ->
     Msg = prepare_request(Id, Name, Payload),
-    ?DebugF("Mainframe websocket sending: ~p ~p~n", [?OP_TEXT, Msg]),
-    Frame = websocket:encode_text(Msg),
-    {Frame, Sess};
+    ?DebugF("Mainframe websocket sending: ~p~n", [Msg]),
+    {websocket:encode_text(Msg), Sess};
 
 get_message(#mainframe_close{}, #state_rcv{session = Sess})
   when Sess#mainframe_session.status == connected ->
@@ -94,32 +92,29 @@ parse(Data, State = #state_rcv{acc = [], session = Sess})
 
 parse(Data, State = #state_rcv{acc = [], session = Sess, request = Req})
   when Sess#mainframe_session.status == connected ->
-    case websocket:decode(Data) of
+    case decode_frame(Data) of
       more ->
         ?DebugF("Mainframe websocket receive incomplete frame: ~p~n", [Data]),
         {State#state_rcv{ack_done = false, acc = Data}, [], false};
-      {?OP_CLOSE, _Reason, _} ->
+      {close, _Reason} ->
         ?DebugF("Mainframe websocket closed by the server: ~p~n", [_Reason]),
         {State#state_rcv{ack_done = true}, [], true};
-      {_Opcode, Payload, Left} ->
-        ?DebugF("Mainframe websocket received: ~p ~p~n", [_Opcode, Payload]),
-        try mochijson2:decode(Payload) of
-          Json ->
-            case handle_response(Req#ts_request.param, Json) of
-              ack ->
-                {State#state_rcv{ack_done = true, acc = Left}, [], false};
-              ignore ->
-                {State#state_rcv{ack_done = false, acc = Left}, [], false};
-              {error, _Reason} ->
-                ?DebugF("Mainframe protocol error received: ~p~n", [_Reason]),
-                ts_mon_cache:add({count, mainframe_protocol_error}),
-                {State#state_rcv{ack_done = true, acc = Left}, [], true}
-            end
-        catch
-          _:_ ->
-            ?Debug("Not a valid JSON packet"),
+      {ok, Packet, FrameData, Left} ->
+        ?DebugF("Mainframe websocket received: ~p~n", [FrameData]),
+        case handle_response(Req#ts_request.param, Packet) of
+          ack ->
+            {State#state_rcv{ack_done = true, acc = Left}, [], false};
+          ignore ->
+            {State#state_rcv{ack_done = false, acc = Left}, [], false};
+          {error, _Reason} ->
+            ?DebugF("Mainframe protocol error received: ~p~n", [_Reason]),
+            ts_mon_cache:add({count, mainframe_protocol_error}),
             {State#state_rcv{ack_done = true, acc = Left}, [], true}
-        end
+        end;
+      {error, _Reason, _FrameData, Left} ->
+        ?DebugF("Mainframe websocket received: ~p~n", [_FrameData]),
+        ?DebugF("Mainframe packet decoding error: ~p~n", [_Reason]),
+        {State#state_rcv{ack_done = true, acc = Left}, [], true}
     end;
 
 parse(Data, State=#state_rcv{acc = Acc, datasize = DataSize}) ->
@@ -142,7 +137,7 @@ parse_config(Element, Conf) ->
 add_dynparams(true, {DynVars, _S},
               Param = #mainframe_connect{client_id = ClientId},
               _HostData) ->
-    NewClientId = ts_search:subst(ClientId, DynVars),
+    NewClientId = ?SUBST(ClientId, DynVars),
     Param#mainframe_connect{client_id = NewClientId};
 
 add_dynparams(true, {DynVars, _S},
@@ -156,35 +151,46 @@ add_dynparams(_Bool, _DynData, Param, _HostData) ->
 
 
 subst_params(Param = #mainframe_login{username = User, password = Pass}, DynVars) ->
-  NewUser = ts_search:subst(User, DynVars),
-  NewPass = ts_search:subst(Pass, DynVars),
-  Param#mainframe_login{username = NewUser, password = NewPass};
+    NewUser = ?SUBST(User, DynVars),
+    NewPass = ?SUBST(Pass, DynVars),
+    Param#mainframe_login{username = NewUser, password = NewPass};
 
 subst_params(Param = #mainframe_perform{query = Query, variables = Vars}, DynVars) ->
-  NewQuery = ts_search:subst(Query, DynVars),
-  NewVars = subst_value(Vars, DynVars),
-  Param#mainframe_perform{query = NewQuery, variables = NewVars}.
-
-
-subst_item({Name, Value}, DynVars) ->
-  {Name, subst_value(Value, DynVars)}.
-
-
-subst_value(Value, DynVars) when is_binary(value) ->
-  ts_search:subst(Value, DynVars);
-
-subst_value([{_, _} | _] = Fields, DynVars) ->
-  [subst_item(I, DynVars) || I <- Fields];
-
-subst_value([_ | _] = Values, DynVars) ->
-  [subst_value(V, DynVars) || V <- Values];
-
-subst_value(Value, _DynVars) -> Value.
+    NewQuery = ?SUBST(Query, DynVars),
+    NewVars = ?SUBST(Vars, DynVars),
+    Param#mainframe_perform{query = NewQuery, variables = NewVars}.
 
 
 websocket_path(ClientId) ->
     EncodedId = http_uri:encode(ClientId),
     iolist_to_binary(io_lib:format(?WS_PATH, [EncodedId])).
+
+
+decode_frame(Data) ->
+    case websocket:decode(Data) of
+      more -> more;
+      {?OP_CLOSE, Reason, _} -> {close, Reason};
+      {_Opcode, FrameData, Left} ->
+        case decode_packet(FrameData) of
+          {ok, Packet} -> {ok, Packet, FrameData, Left};
+          {error, Reason} -> {error, Reason, FrameData, Left}
+        end
+    end.
+
+
+decode_packet(Packet) ->
+    try mochijson2:decode(Packet) of
+      Json -> {ok, Json}
+    catch
+      _:_ -> {error, bad_json}
+    end.
+
+
+extract_payload([_, _, Payload, _]) -> Payload;
+
+extract_payload([_, _, Payload]) -> Payload;
+
+extract_payload(_) -> <<>>.
 
 
 format_request(Id, Name, Payload) ->
@@ -199,11 +205,13 @@ prepare_request(Id, Name, Params) ->
 
 prepare_payload(#mainframe_login{username = User, password = Pass}) ->
     ts_mon_cache:add({count, mainframe_login}),
-    [{username, User}, {password, Pass}];
+    [{username, ?VALUE(User)}, {password, ?VALUE(Pass)}];
 
 prepare_payload(#mainframe_perform{operation_name = Name, query = Query, variables = Vars}) ->
     ts_mon_cache:add({count, mainframe_graphql_perform}),
-    [{operation_name, Name}, {query, Query}, {variables, Vars}].
+    [{operation_name, ?VALUE(Name)},
+     {query, ?VALUE(Query)},
+     {variables, ?VALUE(Vars)}].
 
 
 handle_response(#mainframe_request{id = Id, name = Name},
@@ -212,7 +220,7 @@ handle_response(#mainframe_request{id = Id, name = Name},
     {error, Reason};
 
 handle_response(#mainframe_request{id = Id, name = Name},
-                [<<"error">>, Name, _Payload, Id]) ->    
+                [<<"error">>, Name, _Payload, Id]) ->
     {error, unknown};
 
 handle_response(#mainframe_request{id = Id, name = Name},

@@ -1,8 +1,11 @@
 -module(ts_config_mainframe).
 
 -export([
-    parse_config/2,
-    uuid/0
+    uuid/0,
+    subst/2,
+    value/1,
+    convert/2,
+    parse_config/2
 ]).
 
 -include("ts_profile.hrl").
@@ -16,6 +19,81 @@
 -define(default_password, <<"secret">>).
 
 
+uuid() -> base64:encode(crypto:strong_rand_bytes(16)).
+
+
+subst(?MV{ready = true} = Spec, _DynVars) -> Spec;
+
+subst(?MV{type = Type, value = Value} = Spec, DynVars)
+  when Type =:= string; Type =:= atom; Type =:= number; Type =:= boolean ->
+    NewValue = convert(Type, ts_search:subst(Value, DynVars)),
+    post_subst(Spec, NewValue);
+
+subst(?MV{type = list, value = Values} = Spec, DynVars) ->
+    NewValues = [subst(V, DynVars) || V <- Values],
+    post_subst(Spec, NewValues);
+
+subst(?MV{type = object, value = Values} = Spec, DynVars) ->
+    NewValues = [{subst(N, DynVars), subst(V, DynVars)} || {N, V} <- Values],
+    post_subst(Spec, NewValues);
+
+subst(?MV{} = Spec, _DynVars) -> throw({invalid_value_spec, Spec});
+
+subst(Value, _DynVars) -> Value.
+
+
+value(?MV{ready = false, value = Value}) ->
+    throw({value_needs_substitution, Value});
+
+value(?MV{type = Type, value = Value})
+  when Type =:= string; Type =:= atom; Type =:= number; Type =:= boolean; Type =:= null ->
+    Value;
+
+value(?MV{type = list, value = Values}) ->
+  [value(V) || V <- Values];
+
+value(?MV{type = object, value = Values}) ->
+  [{value(N), value(V)} || {N, V} <- Values];
+
+value(?MV{} = Spec) -> throw({invalid_value_spec, Spec});
+
+value(Value) -> Value.
+
+
+convert(string, Value) when is_list(Value) -> list_to_binary(Value);
+
+convert(string, Value) when is_binary(Value) -> Value;
+
+convert(boolean, true) -> true;
+
+convert(boolean, false) -> false;
+
+convert(boolean, "true") -> true;
+
+convert(boolean, "false") -> false;
+
+convert(boolean, <<"true">>) -> true;
+
+convert(boolean, <<"false">>) -> false;
+
+convert(atom, Value) when is_atom(Value) -> Value;
+
+convert(atom, Value) when is_list(Value) -> list_to_atom(Value);
+
+convert(atom, Value) when is_binary(Value) -> binary_to_atom(Value, utf8);
+
+convert(number, Value) when is_number(Value) -> Value;
+
+convert(number, Value) when is_binary(Value) ->
+  convert(number, binary_to_list(Value));
+
+convert(number, Value) when is_list(Value) ->
+    case erl_scan:string(Value) of
+      {ok, [{integer, _, I}],_} -> I;
+      {ok, [{float, _, F}],_} -> F
+    end.
+
+
 parse_config(Element = #xmlElement{name = dyn_variable}, Conf = #config{}) ->
     ts_config:parse(Element, Conf);
 
@@ -23,7 +101,7 @@ parse_config(Element = #xmlElement{name = mainframe},
              Config = #config{curid = Id, session_tab = Tab,
                               sessions = [CurS | _], dynvar = DynVar,
                               subst = SubstFlag, match = MatchRegExp}) ->
-    Type = xml_attrib(atom, Element, type),
+    Type = xml_attrib_value(atom, Element, type),
     Request = build_request(Type, Element),
 
 
@@ -49,17 +127,13 @@ parse_config(_Data, Conf = #config{}) ->
     Conf.
 
 
-uuid() ->
-    base64:encode(crypto:strong_rand_bytes(16)).
-
-
 build_request(connect, Element) ->
-    ClientId = xml_attrib(binary, Element, client_id, uuid()),
+    ClientId = xml_attrib(string, Element, client_id, uuid()),
     #mainframe_connect{client_id = ClientId};
 
 build_request(login, Element) ->
-    Username = xml_attrib(binary, Element, username, ?default_username),
-    Password = xml_attrib(binary, Element, password, ?default_password),
+    Username = xml_attrib(string, Element, username, ?default_username),
+    Password = xml_attrib(string, Element, password, ?default_password),
     Payload = #mainframe_login{username = Username, password = Password},
     #mainframe_request{id = uuid(), name = <<"login">>, payload = Payload};
 
@@ -78,84 +152,74 @@ build_request(close, _Element) ->
 parse_variables(Element) ->
     case xml_child(Element, variables, null) of
       null -> [];
-      #xmlElement{content = Content} ->
-        [{N, V} || {ok, N, V} <- [parse_variables_item(E) || E <- Content]]
+      #xmlElement{} = Child ->
+        {ok, Vars} = parse_variable_object(Child),
+        Vars
     end.
-
-
-parse_variables_item(Element) ->
-  case parse_variables_value(Element) of
-    {ok, V} -> {ok, xml_attrib(binary, Element, name), V};
-    Other -> Other
-  end.
-
-
-parse_variables_value(#xmlText{}) -> ignore;
-
-parse_variables_value(Element = #xmlElement{name = number}) ->
-    {ok, xml_text(integer, Element)};
-
-parse_variables_value(Element = #xmlElement{name = boolean}) ->
-    {ok, xml_text(boolean, Element)};
-
-parse_variables_value(Element = #xmlElement{name = string}) ->
-    {ok, xml_text(binary, Element)};
-
-parse_variables_value(Element = #xmlElement{name = list, content = Content}) ->
-    {ok, [V || {ok, V} <- [parse_variables_value(E) || E <- Content]]};
-
-parse_variables_value(Element = #xmlElement{name = object, content = Content}) ->
-    {ok, [{V, N} || {ok, V, N} <- [parse_variables_item(E) || E <- Content]]};
-
-parse_variables_value(Element = #xmlElement{name = null}) ->
-    {ok, null}.
 
 
 parse_query(Element) ->
     QueryElem = xml_child(Element, query),
-    Name = xml_attrib(binary, QueryElem, name),
-    Query = xml_text(binary, QueryElem),
-    Cleaned = re:replace(Query, "\n +", "\n", [global, {return, binary}]),
-    {Name, Cleaned}.
+    Name = xml_attrib(string, QueryElem, name),
+    Query = xml_text(string, QueryElem),
+    Post = fun(V) -> re:replace(V, "\n +", "\n", [global, {return, binary}]) end,
+    PostQuery = post_value(Query, Post),
+    {Name, PostQuery}.
 
 
-xml_value(string, Value) -> Value;
+parse_variable_value(#xmlText{}) -> ignore;
 
-xml_value(list, Value) -> Value;
+parse_variable_value(Element = #xmlElement{name = number}) ->
+    {ok, xml_text(number, Element)};
 
-xml_value(binary, Value) -> list_to_binary(Value);
+parse_variable_value(Element = #xmlElement{name = boolean}) ->
+    {ok, xml_text(boolean, Element)};
 
-xml_value(boolean, "true") -> true;
+parse_variable_value(Element = #xmlElement{name = string}) ->
+    {ok, xml_text(string, Element)};
 
-xml_value(boolean, "false") -> false;
+parse_variable_value(Element = #xmlElement{name = list}) ->
+    parse_variable_list(Element);
 
-xml_value(float_or_integer, Value)->
-    case erl_scan:string(Value) of
-      {ok, [{integer, _, I}],_} -> I;
-      {ok, [{float, _, F}],_} -> F
-    end;
+parse_variable_value(Element = #xmlElement{name = object}) ->
+    parse_variable_object(Element);
 
-xml_value(integer_or_string, Value)->
-    case erl_scan:string(Value) of
-        {ok, [{integer, _, I}], _} -> I;
-        _ -> Value
-    end;
+parse_variable_value(#xmlElement{name = null}) ->
+    {ok, ?MV{}}.
 
-xml_value(Type, Value) ->
-    {ok, [{Type, _, Val}], _} = erl_scan:string(Value),
-    Val.
+
+parse_variable_object(#xmlElement{content = Content}) ->
+    Values = [{N, V} || {ok, N, V} <- [parse_variable_item(E) || E <- Content]],
+    {ok, ?MV{type = object, ready = maybe, value = Values}}.
+
+
+parse_variable_list(#xmlElement{content = Content}) ->
+    Values = [V || {ok, V} <- [parse_variable_value(E) || E <- Content]],
+    {ok, ?MV{type = list, ready = maybe, value = Values}}.
+
+
+parse_variable_item(Element) ->
+  case parse_variable_value(Element) of
+    {ok, V} -> {ok, xml_attrib(string, Element, name), V};
+    Other -> Other
+  end.
+
+
+xml_attrib_value(Type, Element, Name) ->
+  ?MV{ready = true, value = Value} = xml_attrib(Type, Element, Name),
+  Value.
 
 
 xml_attrib(Type, #xmlElement{attributes = Attribs}, Name) ->
   xml_attrib(Type, Attribs, Name);
 
 xml_attrib(Type, [#xmlAttribute{name = Name, value = Value} | _], Name) ->
-  xml_value(Type, Value);
+  mainframe_value(Type, Value);
 
 xml_attrib(Type, [_ | Rest], Name) ->
   xml_attrib(Type, Rest, Name);
 
-xml_attrib(Type, [], Name) ->
+xml_attrib(_Type, [], Name) ->
   throw({missing_attribute, Name}).
 
 
@@ -163,20 +227,20 @@ xml_attrib(Type, #xmlElement{attributes = Attribs}, Name, Default) ->
   xml_attrib(Type, Attribs, Name, Default);
 
 xml_attrib(Type, [#xmlAttribute{name = Name, value = Value} | _], Name, _Default) ->
-  xml_value(Type, Value);
+  mainframe_value(Type, Value);
 
 xml_attrib(Type, [_ | Rest], Name, Default) ->
   xml_attrib(Type, Rest, Name, Default);
 
-xml_attrib(Type, [], Name, Default) ->
-  Default.
+xml_attrib(Type, [], _Name, Default) ->
+  mainframe_value(Type, Default).
 
 
 xml_text(Type, #xmlElement{content = Content}) ->
   xml_text(Type, Content);
 
 xml_text(Type, [#xmlText{value = Value} | _]) ->
-  xml_value(Type, string:trim(Value, both, "\n\t ")).
+  mainframe_value(Type, string:trim(Value, both, "\n\t ")).
 
 
 xml_child(#xmlElement{content = Content}, Name) -> xml_child(Content, Name);
@@ -195,6 +259,72 @@ xml_child([Element = #xmlElement{name = Name} | _], Name, _Default) -> Element;
 
 xml_child([_ | Rest], Name, Default) -> xml_child(Rest, Name, Default);
 
-xml_child([], Name, Default) -> Default.
+xml_child([], _Name, Default) -> Default.
 
+
+mainframe_value(number, [$%, $% | _] = Value) ->
+    mainframe_value(number, list_to_binary(Value));
+
+mainframe_value(boolean, [$%, $% | _] = Value) ->
+    mainframe_value(boolean, list_to_binary(Value));
+
+mainframe_value(atom, [$%, $% | _] = Value) ->
+    mainframe_value(atom, list_to_binary(Value));
+
+mainframe_value(number, <<$%, $%, _/binary>> = Value) ->
+    case is_var(Value) of
+      true -> ?MV{type = number, ready = false, value = Value};
+      false -> throw({bad_number, Value})
+    end;
+
+mainframe_value(boolean, <<$%, $%, _/binary>> = Value) ->
+    case is_var(Value) of
+      true -> ?MV{type = boolean, ready = false, value = Value};
+      false -> throw({bad_boolean, Value})
+    end;
+
+mainframe_value(atom, <<$%, $%, _/binary>> = Value) ->
+    case is_var(Value) of
+      true -> ?MV{type = atom, ready = false, value = Value};
+      false -> throw({bad_atom, Value})
+    end;
+
+mainframe_value(string, Value) ->
+    case has_var(Value) of
+      true -> ?MV{type = string, ready = false, value = convert(string, Value)};
+      false -> ?MV{type = string, ready = true, value = convert(string, Value)}
+    end;
+
+mainframe_value(Type, Value) ->
+    ?MV{type = Type, ready = true, value = convert(Type, Value)}.
+
+
+post_value(?MV{post = undefined, ready = true, value = Value} = Spec, Post)
+  when is_function(Post) -> Spec?MV{value = Post(Value)};
+
+post_value(?MV{post = undefined} = Spec, Post)
+  when is_function(Post) -> Spec?MV{post = Post}.
+
+
+post_subst(?MV{post = undefined} = Spec, Value) ->
+  Spec?MV{ready = true, value = Value};
+
+post_subst(?MV{post = Fun} = Spec, Value) ->
+  Spec?MV{ready = true, value = Fun(Value)}.
+
+
+is_var(Value) when is_list(Value); is_binary(Value) ->
+  % Not completly exact but a good enough aproximation...
+  case re:run(Value, "^%%_?[a-zA-Z][a-zA-Z0-9_:]*%%$") of
+    {match, _} -> true;
+    _ -> false
+  end.
+
+
+has_var(Value) when is_list(Value); is_binary(Value) ->
+  % Not completly exact but a good enough aproximation...
+  case re:run(Value, "%%_?[a-zA-Z][a-zA-Z0-9_:]*%%") of
+    {match, _} -> true;
+    _ -> false
+  end.
 

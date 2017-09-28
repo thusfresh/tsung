@@ -26,3 +26,16 @@
     variables,
     query
 }).
+
+
+-record(mainframe_value, {
+    type = null,
+    ready = true,
+    post = undefined,
+    value = null
+}).
+
+
+-define(VALUE(V), ts_config_mainframe:value(V)).
+-define(SUBST(V, D), ts_config_mainframe:subst(V, D)).
+-define(MV, #mainframe_value).
