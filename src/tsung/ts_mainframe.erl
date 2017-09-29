@@ -95,7 +95,7 @@ get_message(#mainframe_request{id = Id, name = Name, payload = Payload} = Req,
   when Sess#mainframe_session.status == connected ->
     NewSess = update_metrics(Req, Sess),
     Msg = prepare_request(Id, Name, Payload),
-    ?DebugF("Mainframe websocket sending: ~p~n", [Msg]),
+    ?DebugF("Mainframe websocket sending:~n~s~n", [Msg]),
     {websocket:encode_text(Msg), NewSess};
 
 get_message(#mainframe_close{} = Req, #state_rcv{session = Sess})
@@ -105,7 +105,7 @@ get_message(#mainframe_close{} = Req, #state_rcv{session = Sess})
 
 
 parse(closed, State) ->
-    {State#state_rcv{ack_done = true, acc = [], datasize = 0}, [], true};
+    {State#state_rcv{count = 0, ack_done = true, acc = [], datasize = 0}, [], true};
 
 parse(Data, State = #state_rcv{acc = [], datasize = 0}) ->
     parse(Data, State#state_rcv{datasize = size(Data)});
@@ -130,28 +130,27 @@ parse(Data, State = #state_rcv{acc = [], session = Sess, request = Req})
   when Sess#mainframe_session.status == connected ->
     case decode_frame(Data) of
       more ->
-        ?DebugF("Mainframe websocket receive incomplete frame: ~p~n", [Data]),
+        ?DebugF("Mainframe websocket receive incomplete frame:~n~s~n", [Data]),
         {State#state_rcv{ack_done = false, acc = Data}, [], false};
       {close, _Reason} ->
-        ?DebugF("Mainframe websocket closed by the server: ~p~n", [_Reason]),
-        {State#state_rcv{ack_done = true}, [], true};
+        ?LOGF("Mainframe websocket closed by the server: ~p~n", [_Reason], ?WARN),
+        ts_mon_cache:add({count, mainframe_server_close}),
+        {State#state_rcv{count = 0, ack_done = true}, [], true};
       {ok, Packet, FrameData, Left} ->
-        ?DebugF("Mainframe websocket received: ~p~n", [FrameData]),
+        ?DebugF("Mainframe websocket received:~n~s~n", [FrameData]),
         case handle_response(Req#ts_request.param, Packet) of
           ack ->
             {State#state_rcv{ack_done = true, acc = Left}, [], false};
           ignore ->
             {State#state_rcv{ack_done = false, acc = Left}, [], false};
           {error, _Reason} ->
-            ?DebugF("Mainframe protocol error received: ~p~n", [_Reason]),
-            ts_mon_cache:add({count, mainframe_protocol_error}),
-            ?DebugF(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>~n~p~n", [State]),
-            {State#state_rcv{count=0, ack_done = true, acc = Left}, [], true}
+            {State#state_rcv{count = 0, ack_done = true, acc = Left}, [], true}
         end;
       {error, _Reason, _FrameData, Left} ->
-        ?DebugF("Mainframe websocket received: ~p~n", [_FrameData]),
-        ?DebugF("Mainframe packet decoding error: ~p~n", [_Reason]),
-        {State#state_rcv{ack_done = true, acc = Left}, [], true}
+        ?DebugF("Mainframe websocket received:~n~s~n", [_FrameData]),
+        ?LOGF("Mainframe packet decoding error:~n~p~n", [_Reason], ?WARN),
+        ts_mon_cache:add({count, mainframe_decoding_error}),
+        {State#state_rcv{count = 0, ack_done = true, acc = Left}, [], true}
     end;
 
 parse(Data, State=#state_rcv{acc = Acc, datasize = DataSize}) ->
@@ -160,11 +159,38 @@ parse(Data, State=#state_rcv{acc = Acc, datasize = DataSize}) ->
           State#state_rcv{acc = [], datasize = NewSize}).
 
 
-parse_bidi(Data, State) ->
-    ?LOGF("MMMMMMMMMM ts_mainframe:parse_bidi(Data, State)~nData: ~p~nState: ~p", [Data, State], ?INFO),
-    Result = ts_plugin:parse_bidi(Data, State),
-    ?LOGF(">>>>>>>>>> ts_mainframe:parse_bidi~nResult: ~p", [Result], ?INFO),
-    Result.
+parse_bidi(Data, State = #state_rcv{acc = [], session = Sess, request = Req})
+  when Sess#mainframe_session.status == connected ->
+    case decode_frame(Data) of
+      more ->
+        ?DebugF("(bidi) Mainframe websocket receive incomplete frame:~n~s~n", [Data]),
+        {nodata, State#state_rcv{acc = Data}, think};
+      {close, _Reason} ->
+        ?LOGF("(bidi) Mainframe websocket closed by the server: ~p~n", [_Reason], ?WARN),
+        ts_mon_cache:add({count, mainframe_server_close}),
+        % Tsung do not really support errors for bidi
+        {nodata, State#state_rcv{count = 0}, continue};
+      {ok, Packet, FrameData, Left} ->
+        ?DebugF("(bidi) Mainframe websocket received:~n~s~n", [FrameData]),
+        case handle_bidi(Sess, Packet) of
+          {ignore, NewSess} ->
+            {nodata, State#state_rcv{acc = Left, session = NewSess}, think};
+          {error, _Reason} ->
+            % Tsung do not really support errors for bidi
+            {nodata, State#state_rcv{count = 0, acc = Left}, continue};
+          {think, Data, NewSess} ->
+            {Data, State#state_rcv{acc = Left, session = NewSess}, think};
+          {continue, Data, NewSess} ->
+            {Data, State#state_rcv{acc = Left, session = NewSess}, continue}
+        end;
+      {error, _Reason, _FrameData, Left} ->
+        ?DebugF("(bidi) Mainframe websocket received:~n~s~n", [_FrameData]),
+        ?LOGF("(bidi) Mainframe packet decoding error: ~p~n", [_Reason], ?WARN),
+        ts_mon_cache:add({count, mainframe_decoding_error}),
+        {nodata, State#state_rcv{count = 0, acc = Left}, continue}
+    end;
+
+parse_bidi(Data, State) -> ts_plugin:parse_bidi(Data, State).
 
 
 parse_config(Element, Conf) ->
@@ -200,11 +226,14 @@ decode_frame(Data) ->
     case websocket:decode(Data) of
       more -> more;
       {?OP_CLOSE, Reason, _} -> {close, Reason};
-      {_Opcode, FrameData, Left} ->
+      {?OP_TEXT, FrameData, Left} ->
         case decode_packet(FrameData) of
           {ok, Packet} -> {ok, Packet, FrameData, Left};
           {error, Reason} -> {error, Reason, FrameData, Left}
-        end
+        end;
+      {OpCode, _Data, _Rest} ->
+        ?LOGF("Unexpected websocket OP code: ~p~n", [OpCode], ?ERR),
+        {error, {unexpected_websocekt_opcode, OpCode}}
     end.
 
 
@@ -295,11 +324,28 @@ prepare_payload(#mainframe_graphql{name = Name, graphql = Graphql, variables = V
 handle_response(#mainframe_request{id = Id, name = Name},
                 [<<"error">>, Name, {struct, Fields}, Id]) ->
     Reason = proplists:get_value(<<"reason">>, Fields, unknown),
-    {error, Reason};
+    ts_mon_cache:add({count, mainframe_protocol_error}),
+    ?LOGF("Mainframe protocol error received: ~p~n", [Reason], ?ERR),
+    {error, protocol_error};
 
 handle_response(#mainframe_request{id = Id, name = Name},
                 [<<"error">>, Name, _Payload, Id]) ->
-    {error, unknown};
+    ts_mon_cache:add({count, mainframe_protocol_error}),
+    ?LOG("Unknown Mainframe protocol error received~n", ?ERR),
+    {error, protocol_error};
+
+handle_response(#mainframe_request{id = Id, name = Name},
+                [<<"response">>, Name, {struct, Fields}, Id])
+  when Name =:= <<"graphql.perform">>; Name =:= <<"graphql.subscribe">> ->
+    case proplists:get_value(<<"errors">>, Fields) of
+      undefined -> ack;
+      [] -> ack;
+      _Errors ->
+        ts_mon_cache:add([{count, mainframe_protocol_error},
+                          {count, mainframe_graphql_error}]),
+        ?LOGF("Mainframe graphql error(s) received: ~s~n", [extract_graphql_errors(_Errors)], ?ERR),
+        {error, graphql_error}
+    end;
 
 handle_response(#mainframe_request{id = Id, name = Name},
                 [<<"response">>, Name, _Payload, Id]) ->
@@ -307,12 +353,64 @@ handle_response(#mainframe_request{id = Id, name = Name},
 
 handle_response(#mainframe_request{name = CurrName},
                 [<<"error">>, GotName, _Payload, _Id]) ->
-    ?DebugF("Ignoring Mainframe error for ~p request while waiting for ~p response~n", [GotName, CurrName]),
+    ?LOGF("Ignoring Mainframe error for ~s request while waiting for ~s response~n", [GotName, CurrName], ?ERR),
     ts_mon_cache:add({count, mainframe_ignored_error}),
     ignore;
 
 handle_response(#mainframe_request{name = CurrName},
                 [<<"response">>, GotName, _Payload, _Id]) ->
-    ?DebugF("Ignoring Mainframe response for ~p request while waiting for ~p response~n", [GotName, CurrName]),
+    ?LOGF("Ignoring Mainframe response for ~s request while waiting for ~s response~n", [GotName, CurrName], ?ERR),
     ts_mon_cache:add({count, mainframe_ignored_response}),
-    ignore.
+    ignore;
+
+handle_response(_Req, [<<"event">>, Name, _Payload]) ->
+    ?DebugF("Ignoring Mainframe event ~s~n", [Name]),
+    ts_mon_cache:add({count, mainframe_event}),
+    ignore;
+
+handle_response(_Req, [<<"alert">>, <<"account_flag_changed">>, _]) -> ignore;
+
+handle_response(_Req, [<<"alert">>, <<"invalid_authentication">>, _]) ->
+    ts_mon_cache:add({count, mainframe_authentication_error}),
+    ?LOG("Mainframe authentication invalidated (alert)~n", ?ERR),
+    {error, authentication_invalidated};
+
+handle_response(#mainframe_request{name = Name}, Packet) ->
+    ?LOGF("Received unexpected packet waiting for request ~s response:~n~p~n", [Name, Packet], ?ERR),
+    ts_mon_cache:add({count, mainframe_unexpected_packet}),
+    {error, unexpected_packet}.
+
+
+handle_bidi(Sess, [<<"event">>, Name, _Payload]) ->
+    ?DebugF("Ignoring Mainframe event ~s~n", [Name]),
+    ts_mon_cache:add({count, mainframe_event}),
+    {ignore, Sess};
+
+handle_bidi(Sess, [<<"alert">>, <<"account_flag_changed">>, _]) ->
+    {ignore, Sess};
+
+handle_bidi(_Sess, [<<"alert">>, <<"invalid_authentication">>, _]) ->
+    ts_mon_cache:add({count, mainframe_authentication_error}),
+    ?LOG("Mainframe authentication invalidated (alert)~n", ?ERR),
+    {error, authentication_invalidated};
+
+handle_bidi(Sess, Packet) ->
+    ?LOGF("Received unexpected bidi packet:~n~p~n", [Packet], ?ERR),
+    ts_mon_cache:add({count, mainframe_unexpected_bidi_packet}),
+    {error, unexpected_bidi_packet}.
+
+
+extract_graphql_errors(Errors) ->
+    Reasons = [proplists:get_value(<<"reason">>, E, <<"unknown">>) || {struct, E} <- Errors],
+    join_binaries(Reasons, <<",">>).
+
+
+join_binaries([], _Sep) -> <<>>;
+join_binaries([Part], _Sep) -> Part;
+join_binaries(List, Sep) ->
+    lists:foldr(fun (A, B) ->
+      if
+        bit_size(B) > 0 -> <<A/binary, Sep/binary, B/binary>>;
+        true -> A
+      end
+    end, <<>>, List).
