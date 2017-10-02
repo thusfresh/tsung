@@ -13,7 +13,7 @@
 <!ENTITY protocol "tcp">
 ]
 >
-<tsung loglevel="notice" version="1.0">
+<tsung loglevel="debug" version="1.0">
   <clients>
     <client host="localhost" use_controller_vm="true" maxusers="500" />
   </clients>
@@ -39,6 +39,10 @@
       <!-- ====================================================================
       == Setting up variables
       ===================================================================== -->
+
+      <setdynvars sourcetype="value" value="&wait_between_messages;">
+        <var name="wait_between_messages" />
+      </setdynvars>
 
       <setdynvars sourcetype="value" value="50">
         <var name="avatar_size" />
@@ -171,8 +175,8 @@
         <request subst="true">
           <dyn_variable name="account_id" jsonpath="data.session.actor.id"/>
           <dyn_variable name="cubicle_id" jsonpath="data.session.cubicle.id"/>
-          <dyn_variable name="org_id" jsonpath="data.session.memberships[0].actor.id"/>
-          <dyn_variable name="space_id" jsonpath="data.session.memberships[0].joinedSpaces[0].conversation.id"/>
+          <dyn_variable name="orgs" jsonpath="data.session.memberships"/>
+          <dyn_variable name="spaces" jsonpath="data.session.memberships[0].joinedSpaces"/>
           <mainframe type="graphql">
             <variables>
               <number name="avatarSize">%%_avatar_size%%</number>
@@ -592,6 +596,19 @@
             </query>
           </mainframe>
         </request>
+
+        <setdynvars sourcetype="erlang" callback="ts_mainframe:random_org_id">
+          <var name="org_id" />
+        </setdynvars>
+        <if var="org_id" eq="null">
+          <abort/>
+        </if>
+        <setdynvars sourcetype="erlang" callback="ts_mainframe:random_space_id">
+          <var name="space_id" />
+        </setdynvars>
+        <if var="space_id" eq="null">
+          <abort/>
+        </if>
 
         <request subst="true">
           <mainframe type="graphql">
@@ -2643,7 +2660,7 @@
               <object name="input">
                 <string name="activity">TRACKING</string>
                 <string name="conversationId">%%_space_id%%</string>
-                <string name="clientMutationId">%%ts_mainframe:uuid</string>
+                <string name="clientMutationId">%%ts_mainframe:uuid%%</string>
               </object>
             </variables>
             <mutation>
@@ -3878,7 +3895,7 @@
       <transaction name="messages">
 
         <for from="1" to="&message_count;" incr="1" var="counter">
-          <if var="&wait_between_messages;" eq="true">
+          <if var="wait_between_messages" eq="true">
             <thinktime value="&time_between_messages;" random="true"></thinktime>
           </if>
           <request subst="true">

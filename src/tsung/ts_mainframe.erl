@@ -18,7 +18,9 @@
 
 % Tsung Configuration Callback Functions
 -export([
-  uuid/1
+  uuid/1,
+  random_org_id/1,
+  random_space_id/1
 ]).
 
 % Behaviour ts_plugin Functions
@@ -55,6 +57,29 @@
 
 uuid(_) -> binary_to_list(ts_config_mainframe:uuid()).
 
+
+random_org_id({_, Vars}) ->
+  case pick_random(proplists:get_value(orgs, Vars)) of
+    {struct, OrgFields} ->
+      case proplists:get_value(<<"actor">>, OrgFields) of
+        {struct, ActorFields} ->
+          proplists:get_value(<<"id">>, ActorFields, null);
+        _ -> null
+      end;
+    _ -> null
+  end.
+
+
+random_space_id({_, Vars}) ->
+  case pick_random(proplists:get_value(spaces, Vars)) of
+    {struct, SpaceFields} ->
+      case proplists:get_value(<<"conversation">>, SpaceFields) of
+        {struct, ConvoFields} ->
+          proplists:get_value(<<"id">>, ConvoFields, null);
+        _ -> null
+      end;
+    _ -> null
+  end.
 
 
 %==============================================================================
@@ -414,3 +439,10 @@ join_binaries(List, Sep) ->
         true -> A
       end
     end, <<>>, List).
+
+
+pick_random([]) -> nil;
+
+pick_random(List) ->
+  Index = random:uniform(length(List)),
+  lists:nth(Index, List).
