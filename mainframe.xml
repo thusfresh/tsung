@@ -4,8 +4,9 @@
 <!ENTITY duration "60">
 <!ENTITY user_total "4">
 <!ENTITY user_arrival "10">
+<!ENTITY space_switch_count "10">
 <!ENTITY message_count "10">
-<!ENTITY time_between_messages "5">
+<!ENTITY time_between_messages "1">
 <!ENTITY wait_between_messages "true">
 
 <!ENTITY hostname "localhost">
@@ -13,7 +14,7 @@
 <!ENTITY protocol "tcp">
 ]
 >
-<tsung loglevel="debug" version="1.0">
+<tsung loglevel="notice" version="1.0">
   <clients>
     <client host="localhost" use_controller_vm="true" maxusers="500" />
   </clients>
@@ -86,7 +87,7 @@
 
       <transaction name="login">
         <request subst="true">
-          <dyn_variable name="uref" jsonpath="uref"/>
+          <dyn_variable name="uref" jsonpath="[2].uref"/>
           <mainframe type="login" username="%%_username%%" password="secret"/>
         </request>
       </transaction>
@@ -99,7 +100,7 @@
       <transaction name="loading">
 
         <request subst="true">
-          <dyn_variable name="actor_id" jsonpath="data.session.actor.id"/>
+          <dyn_variable name="actor_id" jsonpath="[2].data.session.actor.id"/>
           <mainframe type="graphql">
             <variables>
               <number name="avatarSize">%%_avatar_size%%</number>
@@ -173,10 +174,10 @@
         </request>
 
         <request subst="true">
-          <dyn_variable name="account_id" jsonpath="data.session.actor.id"/>
-          <dyn_variable name="cubicle_id" jsonpath="data.session.cubicle.id"/>
-          <dyn_variable name="orgs" jsonpath="data.session.memberships"/>
-          <dyn_variable name="spaces" jsonpath="data.session.memberships[0].joinedSpaces"/>
+          <dyn_variable name="account_id" jsonpath="[2].data.session.actor.id"/>
+          <dyn_variable name="cubicle_id" jsonpath="[2].data.session.cubicle.id"/>
+          <dyn_variable name="orgs" jsonpath="[2].data.session.memberships"/>
+          <dyn_variable name="spaces" jsonpath="[2].data.session.memberships[0].joinedSpaces"/>
           <mainframe type="graphql">
             <variables>
               <number name="avatarSize">%%_avatar_size%%</number>
@@ -597,19 +598,6 @@
           </mainframe>
         </request>
 
-        <setdynvars sourcetype="erlang" callback="ts_mainframe:random_org_id">
-          <var name="org_id" />
-        </setdynvars>
-        <if var="org_id" eq="null">
-          <abort/>
-        </if>
-        <setdynvars sourcetype="erlang" callback="ts_mainframe:random_space_id">
-          <var name="space_id" />
-        </setdynvars>
-        <if var="space_id" eq="null">
-          <abort/>
-        </if>
-
         <request subst="true">
           <mainframe type="graphql">
             <variables>
@@ -629,7 +617,7 @@
         </request>
 
         <request subst="true">
-          <dyn_variable name="mailbox_id" jsonpath="data.session.mailbox.id"/>
+          <dyn_variable name="mailbox_id" jsonpath="[2].data.session.mailbox.id"/>
           <mainframe type="graphql">
             <variables>
               <number name="avatarSize">%%_avatar_size%%</number>
@@ -1723,103 +1711,86 @@
       </transaction> <!-- Initial subscriptions -->
 
 
-      <!-- ====================================================================
-      == Loading space
-      ===================================================================== -->
+      <for from="1" to="&space_switch_count;" incr="1" var="switch_counter">
 
-      <transaction name="loading_space">
+        <setdynvars sourcetype="erlang" callback="ts_mainframe:random_org_id">
+          <var name="org_id" />
+        </setdynvars>
+        <if var="org_id" eq="null">
+          <abort/>
+        </if>
+        <setdynvars sourcetype="erlang" callback="ts_mainframe:random_space_id">
+          <var name="space_id" />
+        </setdynvars>
+        <if var="space_id" eq="null">
+          <abort/>
+        </if>
 
-        <request subst="true">
-          <!-- Not sure what cursor to get yet -->
-          <dyn_variable name="space_cursor" jsonpath="data.conversation.messages.edges[0].cursor"/>
-          <mainframe type="graphql">
-            <variables>
-              <number name="avatarSize">%%_avatar_size%%</number>
-              <number name="botLogoHeight">%%_bot_logo_height%%</number>
-              <number name="count">30</number>
-              <null name="cursor"/>
-              <number name="fullModalSize">%%_full_modal_size%%</number>
-              <string name="id">%%_space_id%%</string>
-              <number name="previewSize">%%_preview_size%%</number>
-              <number name="thumbSize">%%_thumb_size%%</number>
-            </variables>
-            <query>
-              query ConversationScreenQuery($avatarSize: Int!, $botLogoHeight: Int!, $count: Int!, $cursor: String, $fullModalSize: Int!, $id: ID!, $previewSize: Int!, $thumbSize: Int!) {
-                conversation: node(id: $id) {
-                  __typename
-                  ...ConversationScreen_conversation
-                  id
-                }
-              }
 
-              fragment ConversationScreen_conversation on Conversation {
-                ...ConversationView_conversation
-              }
+        <!-- ====================================================================
+        == Loading space
+        ===================================================================== -->
 
-              fragment ConversationView_conversation on Conversation {
-                ...ComposeContainer_conversation
-                ...ConversationActivity_conversation
-                ...ConversationHeader_conversation
-                ...ConversationMetrics_conversation
-                ...ConvoMessagesView_conversation
-                ...ParticipantList_conversation
-                ...ConvoHeader_conversation
-                ...ConvoOptions_conversation
-                ...ChangeSubject_conversation
-                ...EditConvoRoles_conversation
-                cid
-                id
-                locked
-                messages(last: $count, before: $cursor) {
-                  edges {
-                    cursor
-                    node {
-                      __typename
-                      id
-                    }
-                  }
-                  pageInfo {
-                    hasPreviousPage
-                    startCursor
-                    endCursor
-                    hasNextPage
-                  }
-                }
-                owner {
-                  __typename
-                  displayId
-                  displayName
-                  uref
-                  ... on Node {
+        <transaction name="loading_space">
+
+          <request subst="true">
+            <!-- Not sure what cursor to get yet -->
+            <dyn_variable name="space_cursor" jsonpath="[2].data.conversation.messages.edges[0].cursor"/>
+            <mainframe type="graphql">
+              <variables>
+                <number name="avatarSize">%%_avatar_size%%</number>
+                <number name="botLogoHeight">%%_bot_logo_height%%</number>
+                <number name="count">30</number>
+                <null name="cursor"/>
+                <number name="fullModalSize">%%_full_modal_size%%</number>
+                <string name="id">%%_space_id%%</string>
+                <number name="previewSize">%%_preview_size%%</number>
+                <number name="thumbSize">%%_thumb_size%%</number>
+              </variables>
+              <query>
+                query ConversationScreenQuery($avatarSize: Int!, $botLogoHeight: Int!, $count: Int!, $cursor: String, $fullModalSize: Int!, $id: ID!, $previewSize: Int!, $thumbSize: Int!) {
+                  conversation: node(id: $id) {
+                    __typename
+                    ...ConversationScreen_conversation
                     id
                   }
                 }
-                participants(all: true) {
-                  __typename
-                  ...BotSubscriptionsModal_bot
-                  ...EditConvoRoles_participant
-                  ... on BotParticipant {
-                    subscriptionCount
-                  }
-                  actor {
-                    __typename
-                    type
-                    ... on BotActor {
-                      logoUrl(height: $botLogoHeight)
-                      color
-                      flags {
-                        supportsMentions
-                        supportsQuickMenus
-                      }
-                      menus {
-                        iconUrl(size: $avatarSize)
-                        payload
-                        title
-                        type
-                        url
+
+                fragment ConversationScreen_conversation on Conversation {
+                  ...ConversationView_conversation
+                }
+
+                fragment ConversationView_conversation on Conversation {
+                  ...ComposeContainer_conversation
+                  ...ConversationActivity_conversation
+                  ...ConversationHeader_conversation
+                  ...ConversationMetrics_conversation
+                  ...ConvoMessagesView_conversation
+                  ...ParticipantList_conversation
+                  ...ConvoHeader_conversation
+                  ...ConvoOptions_conversation
+                  ...ChangeSubject_conversation
+                  ...EditConvoRoles_conversation
+                  cid
+                  id
+                  locked
+                  messages(last: $count, before: $cursor) {
+                    edges {
+                      cursor
+                      node {
+                        __typename
+                        id
                       }
                     }
-                    avatarUrl(size: $avatarSize)
+                    pageInfo {
+                      hasPreviousPage
+                      startCursor
+                      endCursor
+                      hasNextPage
+                    }
+                  }
+                  owner {
+                    __typename
                     displayId
                     displayName
                     uref
@@ -1827,1855 +1798,642 @@
                       id
                     }
                   }
-                }
-                selfParticipating
-                selfRoles {
-                  isModerator
-                }
-                selfOrgRoles {
-                  isMaster
-                  isAdmin
-                }
-                subject
-                type
-              }
-
-              fragment ComposeContainer_conversation on Conversation {
-                ...ConversationMetrics_conversation
-                id
-                type
-                participants(all: true) {
-                  __typename
+                  participants(all: true) {
+                    __typename
+                    ...BotSubscriptionsModal_bot
+                    ...EditConvoRoles_participant
+                    ... on BotParticipant {
+                      subscriptionCount
+                    }
+                    actor {
+                      __typename
+                      type
+                      ... on BotActor {
+                        logoUrl(height: $botLogoHeight)
+                        color
+                        flags {
+                          supportsMentions
+                          supportsQuickMenus
+                        }
+                        menus {
+                          iconUrl(size: $avatarSize)
+                          payload
+                          title
+                          type
+                          url
+                        }
+                      }
+                      avatarUrl(size: $avatarSize)
+                      displayId
+                      displayName
+                      uref
+                      ... on Node {
+                        id
+                      }
+                    }
+                  }
+                  selfParticipating
+                  selfRoles {
+                    isModerator
+                  }
+                  selfOrgRoles {
+                    isMaster
+                    isAdmin
+                  }
+                  subject
                   type
+                }
+
+                fragment ComposeContainer_conversation on Conversation {
+                  ...ConversationMetrics_conversation
+                  id
+                  type
+                  participants(all: true) {
+                    __typename
+                    type
+                    actor {
+                      __typename
+                      ...TargetActorMetrics_actor
+                      type
+                      displayId
+                      displayName
+                      avatarUrl(size: $avatarSize)
+                      ... on BotActor {
+                        flags {
+                        supportsMentions
+                        }
+                      }
+                      ... on Node {
+                        id
+                      }
+                    }
+                  }
+                }
+
+                fragment ConversationActivity_conversation on Conversation {
+                  type
+                  activities {
+                    actors(filter: COMPOSING, max: 6) {
+                      __typename
+                      displayId
+                      ... on Node {
+                        id
+                      }
+                    }
+                    total(filter: COMPOSING)
+                  }
+                }
+
+                fragment ConversationHeader_conversation on Conversation {
+                  ...SimpleAvatarConvo_conversation
+                  participantCount
+                  avatarUrl(size: $avatarSize)
+                  moderatorSettings {
+                    pendingParticipantsCount
+                  }
+                  participants(all: true) {
+                    __typename
+                    actor {
+                      __typename
+                      ...SimpleAvatarAccount_actor
+                      avatarUrl(size: $avatarSize)
+                      displayName
+                      displayId
+                      ... on Node {
+                        id
+                      }
+                    }
+                  }
+                  subject
+                  type
+                }
+
+                fragment ConversationMetrics_conversation on Conversation {
+                  subject
+                  type
+                  access
+                  autojoin
+                  participantCount
+                  selfParticipating
+                  owner {
+                    __typename
+                    displayId
+                    displayName
+                    ... on NativeActor {
+                      subtype
+                    }
+                    ... on Node {
+                      id
+                    }
+                  }
+                  selfOrgRoles {
+                    isAdmin
+                    isGuest
+                    isMaster
+                    isPending
+                  }
+                  selfRoles {
+                    isModerator
+                  }
+                }
+
+                fragment ConvoMessagesView_conversation on Conversation {
+                  ...BasicMessage_conversation
+                  ...ComposeContainer_conversation
+                  ...ConversationActivity_conversation
+                  ...ConversationHeader_conversation
+                  ...ConversationMetrics_conversation
+                  ...OnboardingMessage_conversation
+                  id
+                  autojoin
+                  lastMessageIndex
+                  mentions {
+                    newest
+                    oldest
+                  }
+                  messages(last: $count, before: $cursor) {
+                    edges {
+                      cursor
+                      node {
+                        ...BasicMessage_message
+                        ...SysMessage_message
+                        actor {
+                          __typename
+                          ... on Node {
+                            id
+                          }
+                        }
+                        availableActions {
+                          id
+                        }
+                        creationTime
+                        id
+                        index
+                        source
+                        __typename
+                      }
+                    }
+                    pageInfo {
+                      hasPreviousPage
+                      startCursor
+                      endCursor
+                      hasNextPage
+                    }
+                  }
+                  pointer
+                  selfOrgRoles {
+                    isAdmin
+                    isMaster
+                  }
+                  selfParticipating
+                  selfRoles {
+                    isModerator
+                  }
+                  subject
+                  type
+                }
+
+                fragment ParticipantList_conversation on Conversation {
+                  id
+                  locked
+                  participants(all: true) {
+                    __typename
+                    ...ParticipantBot_participant
+                    ...ParticipantHuman_participant
+                    ... on BotParticipant {
+                      subscriptionCount
+                    }
+                    type
+                    actor {
+                      __typename
+                      ... on BotActor {
+                        flags {
+                        supportsSubscriptions
+                        }
+                      }
+                      ... on Node {
+                        id
+                      }
+                    }
+                  }
+                  selfParticipating
+                  selfRoles {
+                    isModerator
+                  }
+                  subject
+                  type
+                }
+
+                fragment ConvoHeader_conversation on Conversation {
+                  ...SimpleAvatarConvo_conversation
+                  id
+                  type
+                  subject
+                  access
+                  ownerOrgId
+                  participantCount
+                  avatarUrl(size: $avatarSize)
+                  owner {
+                    __typename
+                    displayId
+                    ... on Node {
+                      id
+                    }
+                  }
+                  participants(all: true) {
+                    __typename
+                    type
+                    ... on BotParticipant {
+                      subscriptionCount
+                    }
+                    actor {
+                      __typename
+                      ...SimpleAvatarAccount_actor
+                      displayId
+                      displayName
+                      avatarUrl(size: $avatarSize)
+                      ... on Node {
+                        id
+                      }
+                      ... on BotActor {
+                        flags {
+                          supportsSubscriptions
+                        }
+                      }
+                    }
+                  }
+                }
+
+                fragment ConvoOptions_conversation on Conversation {
+                  ...isLobby_conversation
+                  id
+                  type
+                  subject
+                  access
+                  locked
+                  autojoin
+                  selfParticipating
+                  participantCount
+                  moderatorSettings {
+                    pendingParticipantsCount
+                  }
+                  selfOrgRoles {
+                    isGuest
+                    isAdmin
+                    isMaster
+                    isMe
+                    isPending
+                  }
+                  selfRoles {
+                    isModerator
+                  }
+                  owner {
+                    __typename
+                    ... on Node {
+                      id
+                    }
+                  }
+                }
+
+                fragment ChangeSubject_conversation on Conversation {
+                  id
+                  type
+                  subject
+                }
+
+                fragment EditConvoRoles_conversation on Conversation {
+                  ...ConversationMetrics_conversation
+                  type
+                  id
+                  selfRoles {
+                    isModerator
+                  }
+                  selfOrgRoles {
+                    isGuest
+                    isAdmin
+                    isMaster
+                  }
+                }
+
+                fragment BotSubscriptionsModal_bot on BotParticipant {
+                  actor {
+                    __typename
+                    displayId
+                    uref
+                    ... on Node {
+                      id
+                    }
+                  }
+                  subscriptions {
+                    creator {
+                      displayName
+                      id
+                    }
+                    name
+                    subId
+                  }
+                }
+
+                fragment EditConvoRoles_participant on Participant {
                   actor {
                     __typename
                     ...TargetActorMetrics_actor
-                    type
-                    displayId
-                    displayName
-                    avatarUrl(size: $avatarSize)
-                    ... on BotActor {
-                      flags {
-                      supportsMentions
-                      }
-                    }
                     ... on Node {
                       id
                     }
-                  }
-                }
-              }
-
-              fragment ConversationActivity_conversation on Conversation {
-                type
-                activities {
-                  actors(filter: COMPOSING, max: 6) {
-                    __typename
-                    displayId
-                    ... on Node {
-                      id
-                    }
-                  }
-                  total(filter: COMPOSING)
-                }
-              }
-
-              fragment ConversationHeader_conversation on Conversation {
-                ...SimpleAvatarConvo_conversation
-                participantCount
-                avatarUrl(size: $avatarSize)
-                moderatorSettings {
-                  pendingParticipantsCount
-                }
-                participants(all: true) {
-                  __typename
-                  actor {
-                    __typename
-                    ...SimpleAvatarAccount_actor
-                    avatarUrl(size: $avatarSize)
-                    displayName
-                    displayId
-                    ... on Node {
-                      id
-                    }
-                  }
-                }
-                subject
-                type
-              }
-
-              fragment ConversationMetrics_conversation on Conversation {
-                subject
-                type
-                access
-                autojoin
-                participantCount
-                selfParticipating
-                owner {
-                  __typename
-                  displayId
-                  displayName
-                  ... on NativeActor {
-                    subtype
-                  }
-                  ... on Node {
-                    id
-                  }
-                }
-                selfOrgRoles {
-                  isAdmin
-                  isGuest
-                  isMaster
-                  isPending
-                }
-                selfRoles {
-                  isModerator
-                }
-              }
-
-              fragment ConvoMessagesView_conversation on Conversation {
-                ...BasicMessage_conversation
-                ...ComposeContainer_conversation
-                ...ConversationActivity_conversation
-                ...ConversationHeader_conversation
-                ...ConversationMetrics_conversation
-                ...OnboardingMessage_conversation
-                id
-                autojoin
-                lastMessageIndex
-                mentions {
-                  newest
-                  oldest
-                }
-                messages(last: $count, before: $cursor) {
-                  edges {
-                    cursor
-                    node {
-                      ...BasicMessage_message
-                      ...SysMessage_message
-                      actor {
-                        __typename
-                        ... on Node {
-                          id
-                        }
-                      }
-                      availableActions {
-                        id
-                      }
-                      creationTime
-                      id
-                      index
-                      source
-                      __typename
-                    }
-                  }
-                  pageInfo {
-                    hasPreviousPage
-                    startCursor
-                    endCursor
-                    hasNextPage
-                  }
-                }
-                pointer
-                selfOrgRoles {
-                  isAdmin
-                  isMaster
-                }
-                selfParticipating
-                selfRoles {
-                  isModerator
-                }
-                subject
-                type
-              }
-
-              fragment ParticipantList_conversation on Conversation {
-                id
-                locked
-                participants(all: true) {
-                  __typename
-                  ...ParticipantBot_participant
-                  ...ParticipantHuman_participant
-                  ... on BotParticipant {
-                    subscriptionCount
                   }
                   type
-                  actor {
-                    __typename
-                    ... on BotActor {
-                      flags {
-                      supportsSubscriptions
-                      }
-                    }
-                    ... on Node {
-                      id
-                    }
+                  ... on NativeParticipant {
+                    isModerator
                   }
                 }
-                selfParticipating
-                selfRoles {
-                  isModerator
-                }
-                subject
-                type
-              }
 
-              fragment ConvoHeader_conversation on Conversation {
-                ...SimpleAvatarConvo_conversation
-                id
-                type
-                subject
-                access
-                ownerOrgId
-                participantCount
-                avatarUrl(size: $avatarSize)
-                owner {
-                  __typename
+                fragment TargetActorMetrics_actor on Actor {
                   displayId
-                  ... on Node {
-                    id
-                  }
+                  displayName
+                  uref
                 }
-                participants(all: true) {
-                  __typename
-                  type
+
+                fragment isLobby_conversation on Conversation {
+                  autojoin
+                  subject
+                  ownerOrgId
+                }
+
+                fragment SimpleAvatarConvo_conversation on Conversation {
+                  avatarUrl(size: $avatarSize)
+                  subject
+                }
+
+                fragment SimpleAvatarAccount_actor on Actor {
+                  displayId
+                  displayName
+                  avatarUrl(size: $avatarSize)
+                }
+
+                fragment ParticipantBot_participant on Participant {
                   ... on BotParticipant {
-                    subscriptionCount
-                  }
-                  actor {
-                    __typename
-                    ...SimpleAvatarAccount_actor
-                    displayId
-                    displayName
-                    avatarUrl(size: $avatarSize)
-                    ... on Node {
-                      id
-                    }
-                    ... on BotActor {
-                      flags {
-                        supportsSubscriptions
-                      }
-                    }
-                  }
-                }
-              }
-
-              fragment ConvoOptions_conversation on Conversation {
-                ...isLobby_conversation
-                id
-                type
-                subject
-                access
-                locked
-                autojoin
-                selfParticipating
-                participantCount
-                moderatorSettings {
-                  pendingParticipantsCount
-                }
-                selfOrgRoles {
-                  isGuest
-                  isAdmin
-                  isMaster
-                  isMe
-                  isPending
-                }
-                selfRoles {
-                  isModerator
-                }
-                owner {
-                  __typename
-                  ... on Node {
-                    id
-                  }
-                }
-              }
-
-              fragment ChangeSubject_conversation on Conversation {
-                id
-                type
-                subject
-              }
-
-              fragment EditConvoRoles_conversation on Conversation {
-                ...ConversationMetrics_conversation
-                type
-                id
-                selfRoles {
-                  isModerator
-                }
-                selfOrgRoles {
-                  isGuest
-                  isAdmin
-                  isMaster
-                }
-              }
-
-              fragment BotSubscriptionsModal_bot on BotParticipant {
-                actor {
-                  __typename
-                  displayId
-                  uref
-                  ... on Node {
-                    id
-                  }
-                }
-                subscriptions {
-                  creator {
-                    displayName
-                    id
-                  }
-                  name
-                  subId
-                }
-              }
-
-              fragment EditConvoRoles_participant on Participant {
-                actor {
-                  __typename
-                  ...TargetActorMetrics_actor
-                  ... on Node {
-                    id
-                  }
-                }
-                type
-                ... on NativeParticipant {
-                  isModerator
-                }
-              }
-
-              fragment TargetActorMetrics_actor on Actor {
-                displayId
-                displayName
-                uref
-              }
-
-              fragment isLobby_conversation on Conversation {
-                autojoin
-                subject
-                ownerOrgId
-              }
-
-              fragment SimpleAvatarConvo_conversation on Conversation {
-                avatarUrl(size: $avatarSize)
-                subject
-              }
-
-              fragment SimpleAvatarAccount_actor on Actor {
-                displayId
-                displayName
-                avatarUrl(size: $avatarSize)
-              }
-
-              fragment ParticipantBot_participant on Participant {
-                ... on BotParticipant {
-                  actor {
-                    __typename
-                    ...SimpleAvatarAccount_actor
-                    displayId
-                    uref
-                    ... on Node {
-                      id
-                    }
-                    ... on BotActor {
-                      flags {
-                        supportsSubscriptions
-                      }
-                    }
-                  }
-                  subscriptionCount
-                }
-              }
-
-              fragment ParticipantHuman_participant on NativeParticipant {
-                actor {
-                  __typename
-                  ...SimpleAvatarAccount_actor
-                  ... on NativeActor {
-                    id
-                  }
-                  displayId
-                  ... on Node {
-                    id
-                  }
-                }
-                isModerator
-              }
-
-              fragment BasicMessage_conversation on Conversation {
-                ...AttachmentImage_conversation
-                selfParticipating
-                type
-              }
-
-              fragment OnboardingMessage_conversation on Conversation {
-                ...InviteToOrgMessage_conversation
-                type
-              }
-
-              fragment BasicMessage_message on Message {
-                ...AckButton_message
-                ...AttachmentImage_message
-                ...BotBlock_message
-                ...PreviewBlock_message
-                ...TextBlock_message
-                actor {
-                  __typename
-                  ...SimpleAvatarAccount_actor
-                  displayId
-                  displayName
-                  ... on Node {
-                    id
-                  }
-                }
-                blocks {
-                  __typename
-                  ... on MessageBlockText {
-                    ...TextBlock_block
-                    type
-                    key
-                  }
-                  ... on MessageBlockObject {
-                    references {
-                      __typename
-                      ... on MessageReferenceAttachment {
-                        attachment {
-                          id
-                          mimetype
-                          ...AttachmentFile_attachment
-                          ...AttachmentImage_attachment
-                        }
-                      }
-                      ... on MessageReferenceLink {
-                        metadata
-                        url
-                      }
-                    }
-                    type
-                    key
-                  }
-                  ... on MessageBlockUiPayload {
-                    key
-                    type
-                    uiPayload {
-                      ui
-                    }
-                  }
-                  ... on MessageBlockPreview {
-                    link
-                    previews {
-                      ...PreviewBlock_previews
-                    }
-                    type
-                    key
-                  }
-                }
-                id
-              }
-
-              fragment SysMessage_message on Message {
-                ...ActionCubicleMessage_message
-                ...ConvoCubicleMessage_message
-                ...ConvoSysMessage_message
-                ...OrgCubicleMessage_message
-                creationTime
-                type
-              }
-
-              fragment ActionCubicleMessage_message on Message {
-                type
-                creationTime
-                actor {
-                  __typename
-                  displayId
-                  displayName
-                  ... on Node {
-                    id
-                  }
-                }
-                extra {
-                  __typename
-                  ... on MessageExtraAction {
-                    actionTitle
-                    conversationSubject
-                    conversationType
-                    action {
-                      title
-                      originId
-                      conversation {
-                        subject
-                        type
-                        id
-                      }
-                      id
-                    }
-                  }
-                }
-              }
-
-              fragment ConvoCubicleMessage_message on Message {
-                type
-                creationTime
-                actor {
-                  __typename
-                  ...SimpleAvatarAccount_actor
-                  displayId
-                  displayName
-                  ... on Node {
-                    id
-                  }
-                }
-                extra {
-                  __typename
-                  ... on MessageExtraConvo {
-                    conversationSubject
-                    conversationType
-                    conversation {
-                      ...SimpleAvatarConvo_conversation
-                      type
-                      subject
-                      participantCount
-                      id
-                    }
-                  }
-                  ... on MessageExtraConvoMessage {
-                    conversationSubject
-                    conversationType
-                    messageBody
-                    conversation {
-                      ...SimpleAvatarConvo_conversation
-                      type
-                      subject
-                      participantCount
-                      id
-                    }
-                    message {
-                      id
-                      blocks {
-                        __typename
-                        ... on MessageBlockText {
-                          body
-                        }
-                      }
-                    }
-                  }
-                  ... on MessageExtraConvoParticipant {
-                    conversationSubject
-                    conversationType
-                    conversation {
-                      ...SimpleAvatarConvo_conversation
-                      type
-                      subject
-                      participantCount
-                      id
-                    }
-                    participant {
-                      ...SimpleAvatarAccount_actor
-                      displayId
-                      displayName
-                      ... on Node {
-                        id
-                      }
-                      id
-                    }
-                  }
-                }
-              }
-
-              fragment ConvoSysMessage_message on Message {
-                type
-                creationTime
-                actor {
-                  __typename
-                  displayName
-                  ... on Node {
-                    id
-                  }
-                }
-                extra {
-                  __typename
-                  ... on MessageExtraParticipant {
-                    participant {
-                      __typename
-                      displayName
-                      ... on Node {
-                        id
-                      }
-                    }
-                  }
-                  ... on MessageExtraSubject {
-                    subject
-                  }
-                }
-              }
-
-              fragment OrgCubicleMessage_message on Message {
-                type
-                creationTime
-                actor {
-                  __typename
-                  ...SimpleAvatarAccount_actor
-                  displayId
-                  displayName
-                  ... on Node {
-                    id
-                  }
-                }
-                extra {
-                  __typename
-                  ... on MessageExtraOrg {
-                    org {
-                      actor {
-                        __typename
-                        ...SimpleAvatarAccount_actor
-                        displayId
-                        displayName
-                        ... on Node {
-                          id
-                        }
-                      }
-                      id
-                      memberCount
-                    }
-                    orgActor {
-                      ...SimpleAvatarAccount_actor
-                      displayId
-                      displayName
-                      ... on Node {
-                        id
-                      }
-                      id
-                    }
-                  }
-                  ... on MessageExtraOrgMember {
-                    org {
-                      actor {
-                        __typename
-                        ...SimpleAvatarAccount_actor
-                        displayId
-                        displayName
-                        ... on Node {
-                          id
-                        }
-                      }
-                      id
-                      memberCount
-                    }
-                    member {
-                      ...SimpleAvatarAccount_actor
-                      displayId
-                      displayName
-                      ... on Node {
-                        id
-                      }
-                      id
-                    }
-                    orgActor {
-                      ...SimpleAvatarAccount_actor
-                      displayId
-                      displayName
-                      ... on Node {
-                        id
-                      }
-                      id
-                    }
-                  }
-                }
-              }
-
-              fragment AckButton_message on Message {
-                acks {
-                  __typename
-                  ... on Node {
-                    id
-                  }
-                  displayName
-                }
-                acksCount
-                id
-                selfAcked
-              }
-
-              fragment AttachmentImage_message on Message {
-                creationTime
-                actor {
-                  __typename
-                  ... on Node {
-                    id
-                  }
-                }
-              }
-
-              fragment BotBlock_message on Message {
-                actor {
-                  __typename
-                  ... on BotActor {
-                    logoUrl(height: $botLogoHeight)
-                    color
-                  }
-                  uref
-                  ... on Node {
-                    id
-                  }
-                }
-              }
-
-              fragment PreviewBlock_message on Message {
-                ...BotBlock_message
-              }
-
-              fragment TextBlock_message on Message {
-                creationTime
-                index
-              }
-
-              fragment TextBlock_block on MessageBlockText {
-                attributes {
-                  __typename
-                  ... on TextAttributeStyle {
-                    length
-                    start
-                    styles
-                    type
-                  }
-                  ... on TextAttributeHighlight {
-                    length
-                    references {
-                      __typename
-                      ... on MessageReferenceAction {
-                        type
-                        action {
-                          id
-                          selfAssignee {
-                            state
-                          }
-                        }
-                      }
-                      ... on MessageReferenceMention {
-                        selfMentioned
-                        type
-                        target {
-                          __typename
-                          displayId
-                          ... on Node {
-                            id
-                          }
-                        }
-                      }
-                    }
-                    start
-                    type
-                  }
-                }
-                body
-              }
-
-              fragment AttachmentFile_attachment on Attachment {
-                id
-                filename
-                mimetype
-                size
-                url
-                metadata
-                originalImage {
-                  height
-                  width
-                }
-                thumbnail(width: $thumbSize) {
-                  url
-                  size
-                }
-              }
-
-              fragment AttachmentImage_attachment on Attachment {
-                metadata
-                url
-                filename
-                mimetype
-                processed
-                previewImage: thumbnail(width: $previewSize) {
-                  url
-                  width
-                  height
-                }
-                fullModalImage: thumbnail(width: $fullModalSize) {
-                  url
-                  width
-                  height
-                }
-              }
-
-              fragment PreviewBlock_previews on UiPayload {
-                generator {
-                  __typename
-                  ...PreviewBlockActor_actor
-                  ... on BotActor {
-                    color
-                  }
-                  ... on Node {
-                    id
-                  }
-                }
-                ui
-              }
-
-              fragment PreviewBlockActor_actor on Actor {
-                displayId
-                displayName
-                avatarUrl(size: $avatarSize)
-              }
-
-              fragment InviteToOrgMessage_conversation on Conversation {
-                ...ConversationMetrics_conversation
-                subject
-                ownerOrgId
-                ownerOrgAdminSettingsWhenConvoIsAutojoin {
-                  invitedEmails
-                  joinsRestricted
-                  inviteUrl
-                }
-                owner {
-                  __typename
-                  ... on NativeActor {
-                    id
-                  }
-                  ... on Node {
-                    id
-                  }
-                }
-                type
-              }
-
-              fragment AttachmentImage_conversation on Conversation {
-                ...ConversationMetrics_conversation
-              }
-            </query>
-          </mainframe>
-        </request>
-
-        <!-- This really happens after the subscriptions... -->
-        <request subst="true">
-          <mainframe type="graphql">
-            <variables>
-              <object name="input">
-                <string name="activity">TRACKING</string>
-                <string name="conversationId">%%_space_id%%</string>
-                <string name="clientMutationId">%%ts_mainframe:uuid%%</string>
-              </object>
-            </variables>
-            <mutation>
-              mutation ConversationRelayUpdateActivityMutation($input: UpdateActivityInput!) {
-                updateActivity(input: $input) {
-                  clientMutationId
-                }
-              }
-            </mutation>
-          </mainframe>
-        </request>
-
-      </transaction> <!-- Loading space -->
-
-
-      <!-- ====================================================================
-      == Space subscriptions
-      ===================================================================== -->
-
-      <transaction name="space_subscriptions">
-
-        <request subst="true">
-          <mainframe type="graphql">
-            <variables>
-              <number name="avatarSize">%%_avatar_size%%</number>
-              <object name="input">
-                <string name="conversationId">%%_space_id%%</string>
-                <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
-              </object>
-            </variables>
-            <subscription>
-              subscription ConversationViewParticipantsChangedSubscription($avatarSize: Int!, $input: ParticipantsChangedInput!) {
-                participantsChanged(input: $input) {
-                  conversation {
-                    participants(all: true) {
-                      __typename
-                      ...BotSubscriptionsModal_bot
-                      ...EditConvoRoles_participant
-                      actor {
-                        __typename
-                        avatarUrl(size: $avatarSize)
-                        displayId
-                        displayName
-                          ... on Node {
-                          id
-                        }
-                      }
-                    }
-                    id
-                  }
-                }
-              }
-
-              fragment BotSubscriptionsModal_bot on BotParticipant {
-                actor {
-                  __typename
-                  displayId
-                  uref
-                  ... on Node {
-                    id
-                  }
-                }
-                subscriptions {
-                  creator {
-                    displayName
-                    id
-                  }
-                  name
-                  subId
-                }
-              }
-
-              fragment EditConvoRoles_participant on Participant {
-                actor {
-                  __typename
-                  ...TargetActorMetrics_actor
-                  ... on Node {
-                    id
-                  }
-                }
-                type
-                ... on NativeParticipant {
-                  isModerator
-                }
-              }
-
-              fragment TargetActorMetrics_actor on Actor {
-                displayId
-                displayName
-                uref
-              }
-            </subscription>
-          </mainframe>
-        </request>
-
-        <request subst="true">
-          <mainframe type="graphql">
-            <variables>
-              <object name="input">
-                <string name="conversationId">%%_space_id%%</string>
-                <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
-              </object>
-            </variables>
-            <subscription>
-              subscription ConversationRelayActivityChangedSubscription($input: ActivityChangedInput!) {
-                activityChanged(input: $input) {
-                  conversation {
-                    ...ConversationActivity_conversation
-                    id
-                  }
-                }
-              }
-
-              fragment ConversationActivity_conversation on Conversation {
-                type
-                activities {
-                  actors(filter: COMPOSING, max: 6) {
-                    __typename
-                    displayId
-                    ... on Node {
-                      id
-                    }
-                  }
-                  total(filter: COMPOSING)
-                }
-              }
-            </subscription>
-          </mainframe>
-        </request>
-
-        <request subst="true">
-          <mainframe type="graphql">
-            <variables>
-              <object name="input">
-                <string name="conversationId">%%_space_id%%</string>
-                <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
-              </object>
-            </variables>
-            <subscription>
-              subscription ConversationRelayParticipantCountChangedSubscription($input: ParticipantCountChangedInput!) {
-                participantCountChanged(input: $input) {
-                  conversation {
-                    participantCount
-                    id
-                  }
-                }
-              }
-            </subscription>
-          </mainframe>
-        </request>
-
-        <request subst="true">
-          <mainframe type="graphql">
-            <variables>
-              <object name="input">
-                <string name="conversationId">%%_space_id%%</string>
-                <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
-              </object>
-            </variables>
-            <subscription>
-              subscription ConversationRelayPointerChangedSubscription($input: PointerChangedInput!) {
-                pointerChanged(input: $input) {
-                  conversation {
-                    pointer
-                    id
-                  }
-                }
-              }
-            </subscription>
-          </mainframe>
-        </request>
-
-        <request subst="true">
-          <mainframe type="graphql">
-            <variables>
-              <object name="input">
-                <string name="conversationId">%%_space_id%%</string>
-                <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
-              </object>
-            </variables>
-            <subscription>
-              subscription ConversationRelaySubjectChangedSubscription($input: SubjectChangedInput!) {
-                subjectChanged(input: $input) {
-                  conversation {
-                    subject
-                    id
-                  }
-                }
-              }
-            </subscription>
-          </mainframe>
-        </request>
-
-        <request subst="true">
-          <mainframe type="graphql">
-            <variables>
-              <object name="input">
-                <string name="conversationId">%%_space_id%%</string>
-                <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
-              </object>
-            </variables>
-            <subscription>
-              subscription ConversationRelayLockedSubscription($input: ConversationLockedInput!) {
-                conversationLocked(input: $input) {
-                  conversation {
-                    locked
-                    id
-                  }
-                }
-              }
-            </subscription>
-          </mainframe>
-        </request>
-
-        <request subst="true">
-          <mainframe type="graphql">
-            <variables>
-              <object name="input">
-                <string name="conversationId">%%_space_id%%</string>
-                <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
-              </object>
-            </variables>
-            <subscription>
-              subscription ConversationRelayRemovedSubscription($input: ConversationRemovedInput!) {
-                conversationRemoved(input: $input) {
-                  conversationId
-                }
-              }
-            </subscription>
-          </mainframe>
-        </request>
-
-        <request subst="true">
-          <mainframe type="graphql">
-            <variables>
-              <number name="avatarSize">%%_avatar_size%%</number>
-              <number name="botLogoHeight">%%_bot_logo_height%%</number>
-              <number name="fullModalSize">%%_full_modal_size%%</number>
-              <number name="previewSize">%%_preview_size%%</number>
-              <number name="thumbSize">%%_thumb_size%%</number>
-              <object name="input">
-                <string name="conversationId">%%_space_id%%</string>
-                <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
-              </object>
-            </variables>
-            <subscription>
-              subscription ConversationRelayMessageAddedSubscription($avatarSize: Int!, $botLogoHeight: Int!, $fullModalSize: Int!, $input: MessageAddedInput!, , $previewSize: Int!, $thumbSize: Int!) {
-                messageAdded(input: $input) {
-                  conversation {
-                    lastMessageIndex
-                    pointer
-                    id
-                  }
-                  messageEdge {
-                    cursor
-                    node {
-                      ...BasicMessage_message
-                      ...SysMessage_message
-                      actor {
-                        __typename
-                        ... on Node {
-                          id
-                        }
-                      }
-                      availableActions {
-                        id
-                      }
-                      creationTime
-                      id
-                      index
-                      source
-                    }
-                  }
-                }
-              }
-
-              fragment BasicMessage_message on Message {
-                ...AckButton_message
-                ...AttachmentImage_message
-                ...BotBlock_message
-                ...PreviewBlock_message
-                ...TextBlock_message
-                actor {
-                  __typename
-                  ...SimpleAvatarAccount_actor
-                  displayId
-                  displayName
-                  ... on Node {
-                    id
-                  }
-                }
-                blocks {
-                  __typename
-                  ... on MessageBlockText {
-                    ...TextBlock_block
-                    type
-                    key
-                  }
-                  ... on MessageBlockObject {
-                    references {
-                      __typename
-                      ... on MessageReferenceAttachment {
-                        attachment {
-                          id
-                          mimetype
-                          ...AttachmentFile_attachment
-                          ...AttachmentImage_attachment
-                        }
-                      }
-                      ... on MessageReferenceLink {
-                        metadata
-                        url
-                      }
-                    }
-                    type
-                    key
-                  }
-                  ... on MessageBlockUiPayload {
-                    key
-                    type
-                    uiPayload {
-                      ui
-                    }
-                  }
-                  ... on MessageBlockPreview {
-                    link
-                    previews {
-                      ...PreviewBlock_previews
-                    }
-                    type
-                    key
-                  }
-                }
-                id
-              }
-
-              fragment SysMessage_message on Message {
-                ...ActionCubicleMessage_message
-                ...ConvoCubicleMessage_message
-                ...ConvoSysMessage_message
-                ...OrgCubicleMessage_message
-                creationTime
-                type
-              }
-
-              fragment ActionCubicleMessage_message on Message {
-                type
-                creationTime
-                actor {
-                  __typename
-                  displayId
-                  displayName
-                  ... on Node {
-                    id
-                  }
-                }
-                extra {
-                  __typename
-                  ... on MessageExtraAction {
-                    actionTitle
-                    conversationSubject
-                    conversationType
-                    action {
-                      title
-                      originId
-                      conversation {
-                        subject
-                        type
-                        id
-                      }
-                      id
-                    }
-                  }
-                }
-              }
-
-              fragment ConvoCubicleMessage_message on Message {
-                type
-                creationTime
-                actor {
-                  __typename
-                  ...SimpleAvatarAccount_actor
-                  displayId
-                  displayName
-                  ... on Node {
-                    id
-                  }
-                }
-                extra {
-                  __typename
-                  ... on MessageExtraConvo {
-                    conversationSubject
-                    conversationType
-                    conversation {
-                      ...SimpleAvatarConvo_conversation
-                      type
-                      subject
-                      participantCount
-                      id
-                    }
-                  }
-                  ... on MessageExtraConvoMessage {
-                    conversationSubject
-                    conversationType
-                    messageBody
-                    conversation {
-                      ...SimpleAvatarConvo_conversation
-                      type
-                      subject
-                      participantCount
-                      id
-                    }
-                    message {
-                      id
-                      blocks {
-                        __typename
-                        ... on MessageBlockText {
-                          body
-                        }
-                      }
-                    }
-                  }
-                  ... on MessageExtraConvoParticipant {
-                    conversationSubject
-                    conversationType
-                    conversation {
-                      ...SimpleAvatarConvo_conversation
-                      type
-                      subject
-                      participantCount
-                      id
-                    }
-                    participant {
-                      ...SimpleAvatarAccount_actor
-                      displayId
-                      displayName
-                      ... on Node {
-                        id
-                      }
-                      id
-                    }
-                  }
-                }
-              }
-
-              fragment ConvoSysMessage_message on Message {
-                type
-                creationTime
-                actor {
-                  __typename
-                  displayName
-                  ... on Node {
-                    id
-                  }
-                }
-                extra {
-                  __typename
-                  ... on MessageExtraParticipant {
-                    participant {
-                      __typename
-                      displayName
-                      ... on Node {
-                        id
-                      }
-                    }
-                  }
-                  ... on MessageExtraSubject {
-                    subject
-                  }
-                }
-              }
-
-              fragment OrgCubicleMessage_message on Message {
-                type
-                creationTime
-                actor {
-                  __typename
-                  ...SimpleAvatarAccount_actor
-                  displayId
-                  displayName
-                  ... on Node {
-                    id
-                  }
-                }
-                extra {
-                  __typename
-                  ... on MessageExtraOrg {
-                    org {
-                      actor {
-                        __typename
-                        ...SimpleAvatarAccount_actor
-                        displayId
-                        displayName
-                        ... on Node {
-                          id
-                        }
-                      }
-                      id
-                      memberCount
-                    }
-                    orgActor {
-                      ...SimpleAvatarAccount_actor
-                      displayId
-                      displayName
-                      ... on Node {
-                        id
-                      }
-                      id
-                    }
-                  }
-                  ... on MessageExtraOrgMember {
-                    org {
-                      actor {
-                        __typename
-                        ...SimpleAvatarAccount_actor
-                        displayId
-                        displayName
-                        ... on Node {
-                          id
-                        }
-                      }
-                      id
-                      memberCount
-                    }
-                    member {
-                      ...SimpleAvatarAccount_actor
-                      displayId
-                      displayName
-                      ... on Node {
-                        id
-                      }
-                      id
-                    }
-                    orgActor {
-                      ...SimpleAvatarAccount_actor
-                      displayId
-                      displayName
-                      ... on Node {
-                        id
-                      }
-                      id
-                    }
-                  }
-                }
-              }
-
-              fragment SimpleAvatarAccount_actor on Actor {
-                displayId
-                displayName
-                avatarUrl(size: $avatarSize)
-              }
-
-              fragment SimpleAvatarConvo_conversation on Conversation {
-                avatarUrl(size: $avatarSize)
-                subject
-              }
-
-              fragment AckButton_message on Message {
-                acks {
-                  __typename
-                  ... on Node {
-                    id
-                  }
-                  displayName
-                }
-                acksCount
-                id
-                selfAcked
-              }
-
-              fragment AttachmentImage_message on Message {
-                creationTime
-                actor {
-                  __typename
-                  ... on Node {
-                    id
-                  }
-                }
-              }
-
-              fragment BotBlock_message on Message {
-                actor {
-                  __typename
-                  ... on BotActor {
-                    logoUrl(height: $botLogoHeight)
-                    color
-                  }
-                  uref
-                  ... on Node {
-                    id
-                  }
-                }
-              }
-
-              fragment PreviewBlock_message on Message {
-                ...BotBlock_message
-              }
-
-              fragment TextBlock_message on Message {
-                creationTime
-                index
-              }
-
-              fragment TextBlock_block on MessageBlockText {
-                attributes {
-                  __typename
-                  ... on TextAttributeStyle {
-                    length
-                    start
-                    styles
-                    type
-                  }
-                  ... on TextAttributeHighlight {
-                    length
-                    references {
-                      __typename
-                      ... on MessageReferenceAction {
-                        type
-                        action {
-                          id
-                          selfAssignee {
-                            state
-                          }
-                        }
-                      }
-                      ... on MessageReferenceMention {
-                        selfMentioned
-                        type
-                        target {
-                          __typename
-                          displayId
-                          ... on Node {
-                            id
-                          }
-                        }
-                      }
-                    }
-                    start
-                    type
-                  }
-                }
-                body
-              }
-
-              fragment AttachmentFile_attachment on Attachment {
-                id
-                filename
-                mimetype
-                size
-                url
-                metadata
-                originalImage {
-                  height
-                  width
-                }
-                thumbnail(width: $thumbSize) {
-                  url
-                  size
-                }
-              }
-
-              fragment AttachmentImage_attachment on Attachment {
-                metadata
-                url
-                filename
-                mimetype
-                processed
-                previewImage: thumbnail(width: $previewSize) {
-                  url
-                  width
-                  height
-                }
-                fullModalImage: thumbnail(width: $fullModalSize) {
-                  url
-                  width
-                  height
-                }
-              }
-
-              fragment PreviewBlock_previews on UiPayload {
-                generator {
-                  __typename
-                  ...PreviewBlockActor_actor
-                  ... on BotActor {
-                    color
-                  }
-                  ... on Node {
-                    id
-                  }
-                }
-                ui
-              }
-
-              fragment PreviewBlockActor_actor on Actor {
-                displayId
-                displayName
-                avatarUrl(size: $avatarSize)
-              }
-            </subscription>
-          </mainframe>
-        </request>
-
-        <request subst="true">
-          <mainframe type="graphql">
-            <variables>
-              <object name ="input">
-                <string name="conversationId">%%_space_id%%</string>
-                <string name="startingCursor">%%_space_cursor%%</string>
-                <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
-              </object>
-            </variables>
-            <subscription>
-              subscription ConversationRelayActionChangedSubscription($input: ActionChangedInput!) {
-               actionChanged(input: $input) {
-                 action {
-                   id
-                   selfAssignee {
-                     state
-                   }
-                 }
-               }
-               }
-            </subscription>
-          </mainframe>
-        </request>
-
-        <request subst="true">
-          <mainframe type="graphql">
-            <variables>
-              <object name ="input">
-                <string name="conversationId">%%_space_id%%</string>
-                <string name="cursor">%%_space_cursor%%</string>
-                <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
-              </object>
-            </variables>
-            <subscription>
-              subscription ConversationRelayMessageAcksChangedSubscription($input: MessageAcksChangedInput!) {
-                messageAcksChanged(input: $input) {
-                  message {
-                    ...AckButton_message
-                    id
-                  }
-                }
-              }
-
-              fragment AckButton_message on Message {
-                acks {
-                  __typename
-                  ... on Node {
-                    id
-                  }
-                  displayName
-                }
-                acksCount
-                id
-                selfAcked
-              }
-            </subscription>
-          </mainframe>
-        </request>
-
-        <request subst="true">
-          <mainframe type="graphql">
-            <variables>
-              <number name="avatarSize">%%_avatar_size%%</number>
-              <number name="botLogoHeight">%%_bot_logo_height%%</number>
-              <number name="fullModalSize">%%_full_modal_size%%</number>
-              <number name="previewSize">%%_preview_size%%</number>
-              <number name="thumbSize">%%_thumb_size%%</number>
-              <object name ="input">
-                <string name="conversationId">%%_space_id%%</string>
-                <string name="cursor">%%_space_cursor%%</string>
-                <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
-              </object>
-            </variables>
-            <subscription>
-              subscription ConversationRelayMessageContentChangedSubscription($avatarSize: Int!, $botLogoHeight: Int!, $fullModalSize: Int!, $input: MessageContentChangedInput!, $previewSize: Int!, $thumbSize: Int!) {
-                messageContentChanged(input: $input) {
-                  message {
-                    ...BasicMessage_message
-                    ...SysMessage_message
                     actor {
                       __typename
-                      ... on Node {
-                        id
-                      }
-                    }
-                    availableActions {
-                      id
-                    }
-                    creationTime
-                    id
-                    index
-                    source
-                  }
-                }
-              }
-
-              fragment BasicMessage_message on Message {
-                ...AckButton_message
-                ...AttachmentImage_message
-                ...BotBlock_message
-                ...PreviewBlock_message
-                ...TextBlock_message
-                actor {
-                  __typename
-                  ...SimpleAvatarAccount_actor
-                  displayId
-                  displayName
-                  ... on Node {
-                    id
-                  }
-                }
-                blocks {
-                  __typename
-                  ... on MessageBlockText {
-                    ...TextBlock_block
-                    type
-                    key
-                  }
-                  ... on MessageBlockObject {
-                    references {
-                      __typename
-                      ... on MessageReferenceAttachment {
-                        attachment {
-                          id
-                          mimetype
-                          ...AttachmentFile_attachment
-                          ...AttachmentImage_attachment
-                        }
-                      }
-                      ... on MessageReferenceLink {
-                        metadata
-                        url
-                      }
-                    }
-                    type
-                    key
-                  }
-                  ... on MessageBlockUiPayload {
-                    key
-                    type
-                    uiPayload {
-                      ui
-                    }
-                  }
-                  ... on MessageBlockPreview {
-                    link
-                    previews {
-                      ...PreviewBlock_previews
-                    }
-                    type
-                    key
-                  }
-                }
-                id
-              }
-
-              fragment SysMessage_message on Message {
-                ...ActionCubicleMessage_message
-                ...ConvoCubicleMessage_message
-                ...ConvoSysMessage_message
-                ...OrgCubicleMessage_message
-                creationTime
-                type
-              }
-
-              fragment ActionCubicleMessage_message on Message {
-                type
-                creationTime
-                actor {
-                  __typename
-                  displayId
-                  displayName
-                  ... on Node {
-                    id
-                  }
-                }
-                extra {
-                  __typename
-                  ... on MessageExtraAction {
-                    actionTitle
-                    conversationSubject
-                    conversationType
-                    action {
-                      title
-                      originId
-                      conversation {
-                        subject
-                        type
-                        id
-                      }
-                      id
-                    }
-                  }
-                }
-              }
-
-              fragment ConvoCubicleMessage_message on Message {
-                type
-                creationTime
-                actor {
-                  __typename
-                  ...SimpleAvatarAccount_actor
-                  displayId
-                  displayName
-                  ... on Node {
-                    id
-                  }
-                }
-                extra {
-                  __typename
-                  ... on MessageExtraConvo {
-                    conversationSubject
-                    conversationType
-                    conversation {
-                      ...SimpleAvatarConvo_conversation
-                      type
-                      subject
-                      participantCount
-                      id
-                    }
-                  }
-                  ... on MessageExtraConvoMessage {
-                    conversationSubject
-                    conversationType
-                    messageBody
-                    conversation {
-                      ...SimpleAvatarConvo_conversation
-                      type
-                      subject
-                      participantCount
-                      id
-                    }
-                    message {
-                      id
-                      blocks {
-                        __typename
-                        ... on MessageBlockText {
-                          body
-                        }
-                      }
-                    }
-                  }
-                  ... on MessageExtraConvoParticipant {
-                    conversationSubject
-                    conversationType
-                    conversation {
-                      ...SimpleAvatarConvo_conversation
-                      type
-                      subject
-                      participantCount
-                      id
-                    }
-                    participant {
                       ...SimpleAvatarAccount_actor
                       displayId
-                      displayName
+                      uref
                       ... on Node {
                         id
                       }
+                      ... on BotActor {
+                        flags {
+                          supportsSubscriptions
+                        }
+                      }
+                    }
+                    subscriptionCount
+                  }
+                }
+
+                fragment ParticipantHuman_participant on NativeParticipant {
+                  actor {
+                    __typename
+                    ...SimpleAvatarAccount_actor
+                    ... on NativeActor {
+                      id
+                    }
+                    displayId
+                    ... on Node {
                       id
                     }
                   }
+                  isModerator
                 }
-              }
 
-              fragment ConvoSysMessage_message on Message {
-                type
-                creationTime
-                actor {
-                  __typename
-                  displayName
-                  ... on Node {
-                    id
-                  }
+                fragment BasicMessage_conversation on Conversation {
+                  ...AttachmentImage_conversation
+                  selfParticipating
+                  type
                 }
-                extra {
-                  __typename
-                  ... on MessageExtraParticipant {
-                    participant {
-                      __typename
-                      displayName
-                      ... on Node {
+
+                fragment OnboardingMessage_conversation on Conversation {
+                  ...InviteToOrgMessage_conversation
+                  type
+                }
+
+                fragment BasicMessage_message on Message {
+                  ...AckButton_message
+                  ...AttachmentImage_message
+                  ...BotBlock_message
+                  ...PreviewBlock_message
+                  ...TextBlock_message
+                  actor {
+                    __typename
+                    ...SimpleAvatarAccount_actor
+                    displayId
+                    displayName
+                    ... on Node {
+                      id
+                    }
+                  }
+                  blocks {
+                    __typename
+                    ... on MessageBlockText {
+                      ...TextBlock_block
+                      type
+                      key
+                    }
+                    ... on MessageBlockObject {
+                      references {
+                        __typename
+                        ... on MessageReferenceAttachment {
+                          attachment {
+                            id
+                            mimetype
+                            ...AttachmentFile_attachment
+                            ...AttachmentImage_attachment
+                          }
+                        }
+                        ... on MessageReferenceLink {
+                          metadata
+                          url
+                        }
+                      }
+                      type
+                      key
+                    }
+                    ... on MessageBlockUiPayload {
+                      key
+                      type
+                      uiPayload {
+                        ui
+                      }
+                    }
+                    ... on MessageBlockPreview {
+                      link
+                      previews {
+                        ...PreviewBlock_previews
+                      }
+                      type
+                      key
+                    }
+                  }
+                  id
+                }
+
+                fragment SysMessage_message on Message {
+                  ...ActionCubicleMessage_message
+                  ...ConvoCubicleMessage_message
+                  ...ConvoSysMessage_message
+                  ...OrgCubicleMessage_message
+                  creationTime
+                  type
+                }
+
+                fragment ActionCubicleMessage_message on Message {
+                  type
+                  creationTime
+                  actor {
+                    __typename
+                    displayId
+                    displayName
+                    ... on Node {
+                      id
+                    }
+                  }
+                  extra {
+                    __typename
+                    ... on MessageExtraAction {
+                      actionTitle
+                      conversationSubject
+                      conversationType
+                      action {
+                        title
+                        originId
+                        conversation {
+                          subject
+                          type
+                          id
+                        }
                         id
                       }
                     }
                   }
-                  ... on MessageExtraSubject {
-                    subject
-                  }
                 }
-              }
 
-              fragment OrgCubicleMessage_message on Message {
-                type
-                creationTime
-                actor {
-                  __typename
-                  ...SimpleAvatarAccount_actor
-                  displayId
-                  displayName
-                  ... on Node {
-                    id
+                fragment ConvoCubicleMessage_message on Message {
+                  type
+                  creationTime
+                  actor {
+                    __typename
+                    ...SimpleAvatarAccount_actor
+                    displayId
+                    displayName
+                    ... on Node {
+                      id
+                    }
                   }
-                }
-                extra {
-                  __typename
-                  ... on MessageExtraOrg {
-                    org {
-                      actor {
-                        __typename
+                  extra {
+                    __typename
+                    ... on MessageExtraConvo {
+                      conversationSubject
+                      conversationType
+                      conversation {
+                        ...SimpleAvatarConvo_conversation
+                        type
+                        subject
+                        participantCount
+                        id
+                      }
+                    }
+                    ... on MessageExtraConvoMessage {
+                      conversationSubject
+                      conversationType
+                      messageBody
+                      conversation {
+                        ...SimpleAvatarConvo_conversation
+                        type
+                        subject
+                        participantCount
+                        id
+                      }
+                      message {
+                        id
+                        blocks {
+                          __typename
+                          ... on MessageBlockText {
+                            body
+                          }
+                        }
+                      }
+                    }
+                    ... on MessageExtraConvoParticipant {
+                      conversationSubject
+                      conversationType
+                      conversation {
+                        ...SimpleAvatarConvo_conversation
+                        type
+                        subject
+                        participantCount
+                        id
+                      }
+                      participant {
                         ...SimpleAvatarAccount_actor
                         displayId
                         displayName
+                        ... on Node {
+                          id
+                        }
+                        id
+                      }
+                    }
+                  }
+                }
+
+                fragment ConvoSysMessage_message on Message {
+                  type
+                  creationTime
+                  actor {
+                    __typename
+                    displayName
+                    ... on Node {
+                      id
+                    }
+                  }
+                  extra {
+                    __typename
+                    ... on MessageExtraParticipant {
+                      participant {
+                        __typename
+                        displayName
+                        ... on Node {
+                          id
+                        }
+                      }
+                    }
+                    ... on MessageExtraSubject {
+                      subject
+                    }
+                  }
+                }
+
+                fragment OrgCubicleMessage_message on Message {
+                  type
+                  creationTime
+                  actor {
+                    __typename
+                    ...SimpleAvatarAccount_actor
+                    displayId
+                    displayName
+                    ... on Node {
+                      id
+                    }
+                  }
+                  extra {
+                    __typename
+                    ... on MessageExtraOrg {
+                      org {
+                        actor {
+                          __typename
+                          ...SimpleAvatarAccount_actor
+                          displayId
+                          displayName
                           ... on Node {
                             id
                           }
@@ -3696,208 +2454,449 @@
                     ... on MessageExtraOrgMember {
                       org {
                         actor {
-                        __typename
+                          __typename
+                          ...SimpleAvatarAccount_actor
+                          displayId
+                          displayName
+                          ... on Node {
+                            id
+                          }
+                        }
+                        id
+                        memberCount
+                      }
+                      member {
                         ...SimpleAvatarAccount_actor
                         displayId
                         displayName
                         ... on Node {
                           id
                         }
-                      }
-                      id
-                      memberCount
-                    }
-                    member {
-                      ...SimpleAvatarAccount_actor
-                      displayId
-                      displayName
-                      ... on Node {
                         id
                       }
-                      id
-                    }
-                    orgActor {
-                      ...SimpleAvatarAccount_actor
-                      displayId
-                      displayName
-                      ... on Node {
-                        id
-                      }
-                      id
-                    }
-                  }
-                }
-              }
-
-              fragment SimpleAvatarAccount_actor on Actor {
-                displayId
-                displayName
-                avatarUrl(size: $avatarSize)
-              }
-
-              fragment SimpleAvatarConvo_conversation on Conversation {
-                avatarUrl(size: $avatarSize)
-                subject
-              }
-
-              fragment AckButton_message on Message {
-                acks {
-                  __typename
-                  ... on Node {
-                    id
-                  }
-                  displayName
-                }
-                acksCount
-                id
-                selfAcked
-              }
-
-              fragment AttachmentImage_message on Message {
-                creationTime
-                actor {
-                  __typename
-                  ... on Node {
-                    id
-                  }
-                }
-              }
-
-              fragment BotBlock_message on Message {
-                actor {
-                  __typename
-                  ... on BotActor {
-                    logoUrl(height: $botLogoHeight)
-                    color
-                  }
-                  uref
-                  ... on Node {
-                    id
-                  }
-                }
-              }
-
-              fragment PreviewBlock_message on Message {
-                ...BotBlock_message
-              }
-
-              fragment TextBlock_message on Message {
-                creationTime
-                index
-              }
-
-              fragment TextBlock_block on MessageBlockText {
-                attributes {
-                  __typename
-                  ... on TextAttributeStyle {
-                    length
-                    start
-                    styles
-                    type
-                  }
-                  ... on TextAttributeHighlight {
-                    length
-                    references {
-                      __typename
-                      ... on MessageReferenceAction {
-                        type
-                        action {
+                      orgActor {
+                        ...SimpleAvatarAccount_actor
+                        displayId
+                        displayName
+                        ... on Node {
                           id
-                          selfAssignee {
-                            state
+                        }
+                        id
+                      }
+                    }
+                  }
+                }
+
+                fragment AckButton_message on Message {
+                  acks {
+                    __typename
+                    ... on Node {
+                      id
+                    }
+                    displayName
+                  }
+                  acksCount
+                  id
+                  selfAcked
+                }
+
+                fragment AttachmentImage_message on Message {
+                  creationTime
+                  actor {
+                    __typename
+                    ... on Node {
+                      id
+                    }
+                  }
+                }
+
+                fragment BotBlock_message on Message {
+                  actor {
+                    __typename
+                    ... on BotActor {
+                      logoUrl(height: $botLogoHeight)
+                      color
+                    }
+                    uref
+                    ... on Node {
+                      id
+                    }
+                  }
+                }
+
+                fragment PreviewBlock_message on Message {
+                  ...BotBlock_message
+                }
+
+                fragment TextBlock_message on Message {
+                  creationTime
+                  index
+                }
+
+                fragment TextBlock_block on MessageBlockText {
+                  attributes {
+                    __typename
+                    ... on TextAttributeStyle {
+                      length
+                      start
+                      styles
+                      type
+                    }
+                    ... on TextAttributeHighlight {
+                      length
+                      references {
+                        __typename
+                        ... on MessageReferenceAction {
+                          type
+                          action {
+                            id
+                            selfAssignee {
+                              state
+                            }
+                          }
+                        }
+                        ... on MessageReferenceMention {
+                          selfMentioned
+                          type
+                          target {
+                            __typename
+                            displayId
+                            ... on Node {
+                              id
+                            }
                           }
                         }
                       }
-                      ... on MessageReferenceMention {
-                        selfMentioned
-                        type
-                        target {
+                      start
+                      type
+                    }
+                  }
+                  body
+                }
+
+                fragment AttachmentFile_attachment on Attachment {
+                  id
+                  filename
+                  mimetype
+                  size
+                  url
+                  metadata
+                  originalImage {
+                    height
+                    width
+                  }
+                  thumbnail(width: $thumbSize) {
+                    url
+                    size
+                  }
+                }
+
+                fragment AttachmentImage_attachment on Attachment {
+                  metadata
+                  url
+                  filename
+                  mimetype
+                  processed
+                  previewImage: thumbnail(width: $previewSize) {
+                    url
+                    width
+                    height
+                  }
+                  fullModalImage: thumbnail(width: $fullModalSize) {
+                    url
+                    width
+                    height
+                  }
+                }
+
+                fragment PreviewBlock_previews on UiPayload {
+                  generator {
+                    __typename
+                    ...PreviewBlockActor_actor
+                    ... on BotActor {
+                      color
+                    }
+                    ... on Node {
+                      id
+                    }
+                  }
+                  ui
+                }
+
+                fragment PreviewBlockActor_actor on Actor {
+                  displayId
+                  displayName
+                  avatarUrl(size: $avatarSize)
+                }
+
+                fragment InviteToOrgMessage_conversation on Conversation {
+                  ...ConversationMetrics_conversation
+                  subject
+                  ownerOrgId
+                  ownerOrgAdminSettingsWhenConvoIsAutojoin {
+                    invitedEmails
+                    joinsRestricted
+                    inviteUrl
+                  }
+                  owner {
+                    __typename
+                    ... on NativeActor {
+                      id
+                    }
+                    ... on Node {
+                      id
+                    }
+                  }
+                  type
+                }
+
+                fragment AttachmentImage_conversation on Conversation {
+                  ...ConversationMetrics_conversation
+                }
+              </query>
+            </mainframe>
+          </request>
+
+          <!-- This really happens after the subscriptions... -->
+          <request subst="true">
+            <mainframe type="graphql">
+              <variables>
+                <object name="input">
+                  <string name="activity">TRACKING</string>
+                  <string name="conversationId">%%_space_id%%</string>
+                  <string name="clientMutationId">%%ts_mainframe:uuid%%</string>
+                </object>
+              </variables>
+              <mutation>
+                mutation ConversationRelayUpdateActivityMutation($input: UpdateActivityInput!) {
+                  updateActivity(input: $input) {
+                    clientMutationId
+                  }
+                }
+              </mutation>
+            </mainframe>
+          </request>
+
+        </transaction> <!-- Loading space -->
+
+
+        <!-- ====================================================================
+        == Space subscriptions
+        ===================================================================== -->
+
+        <transaction name="space_subscriptions">
+
+          <request subst="true">
+            <mainframe type="graphql">
+              <variables>
+                <number name="avatarSize">%%_avatar_size%%</number>
+                <object name="input">
+                  <string name="conversationId">%%_space_id%%</string>
+                  <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
+                </object>
+              </variables>
+              <subscription>
+                subscription ConversationViewParticipantsChangedSubscription($avatarSize: Int!, $input: ParticipantsChangedInput!) {
+                  participantsChanged(input: $input) {
+                    conversation {
+                      participants(all: true) {
+                        __typename
+                        ...BotSubscriptionsModal_bot
+                        ...EditConvoRoles_participant
+                        actor {
                           __typename
+                          avatarUrl(size: $avatarSize)
                           displayId
-                          ... on Node {
+                          displayName
+                            ... on Node {
                             id
                           }
                         }
                       }
+                      id
                     }
-                    start
-                    type
                   }
                 }
-                body
-              }
 
-              fragment AttachmentFile_attachment on Attachment {
-                id
-                filename
-                mimetype
-                size
-                url
-                metadata
-                originalImage {
-                  height
-                  width
-                }
-                thumbnail(width: $thumbSize) {
-                  url
-                  size
-                }
-              }
-
-              fragment AttachmentImage_attachment on Attachment {
-                metadata
-                url
-                filename
-                mimetype
-                processed
-                previewImage: thumbnail(width: $previewSize) {
-                  url
-                  width
-                  height
-                }
-                fullModalImage: thumbnail(width: $fullModalSize) {
-                  url
-                  width
-                  height
-                }
-              }
-
-              fragment PreviewBlock_previews on UiPayload {
-                generator {
-                  __typename
-                  ...PreviewBlockActor_actor
-                  ... on BotActor {
-                    color
+                fragment BotSubscriptionsModal_bot on BotParticipant {
+                  actor {
+                    __typename
+                    displayId
+                    uref
+                    ... on Node {
+                      id
+                    }
                   }
-                  ... on Node {
-                    id
+                  subscriptions {
+                    creator {
+                      displayName
+                      id
+                    }
+                    name
+                    subId
                   }
                 }
-                ui
-              }
 
-              fragment PreviewBlockActor_actor on Actor {
-                displayId
-                displayName
-                avatarUrl(size: $avatarSize)
-              }
-            </subscription>
-          </mainframe>
-        </request>
+                fragment EditConvoRoles_participant on Participant {
+                  actor {
+                    __typename
+                    ...TargetActorMetrics_actor
+                    ... on Node {
+                      id
+                    }
+                  }
+                  type
+                  ... on NativeParticipant {
+                    isModerator
+                  }
+                }
 
-      </transaction> <!-- Space subscriptions -->
+                fragment TargetActorMetrics_actor on Actor {
+                  displayId
+                  displayName
+                  uref
+                }
+              </subscription>
+            </mainframe>
+          </request>
 
+          <request subst="true">
+            <mainframe type="graphql">
+              <variables>
+                <object name="input">
+                  <string name="conversationId">%%_space_id%%</string>
+                  <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
+                </object>
+              </variables>
+              <subscription>
+                subscription ConversationRelayActivityChangedSubscription($input: ActivityChangedInput!) {
+                  activityChanged(input: $input) {
+                    conversation {
+                      ...ConversationActivity_conversation
+                      id
+                    }
+                  }
+                }
 
-      <!-- ====================================================================
-      == Sending messages
-      ===================================================================== -->
+                fragment ConversationActivity_conversation on Conversation {
+                  type
+                  activities {
+                    actors(filter: COMPOSING, max: 6) {
+                      __typename
+                      displayId
+                      ... on Node {
+                        id
+                      }
+                    }
+                    total(filter: COMPOSING)
+                  }
+                }
+              </subscription>
+            </mainframe>
+          </request>
 
-      <transaction name="messages">
+          <request subst="true">
+            <mainframe type="graphql">
+              <variables>
+                <object name="input">
+                  <string name="conversationId">%%_space_id%%</string>
+                  <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
+                </object>
+              </variables>
+              <subscription>
+                subscription ConversationRelayParticipantCountChangedSubscription($input: ParticipantCountChangedInput!) {
+                  participantCountChanged(input: $input) {
+                    conversation {
+                      participantCount
+                      id
+                    }
+                  }
+                }
+              </subscription>
+            </mainframe>
+          </request>
 
-        <for from="1" to="&message_count;" incr="1" var="counter">
-          <if var="wait_between_messages" eq="true">
-            <thinktime value="&time_between_messages;" random="true"></thinktime>
-          </if>
+          <request subst="true">
+            <mainframe type="graphql">
+              <variables>
+                <object name="input">
+                  <string name="conversationId">%%_space_id%%</string>
+                  <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
+                </object>
+              </variables>
+              <subscription>
+                subscription ConversationRelayPointerChangedSubscription($input: PointerChangedInput!) {
+                  pointerChanged(input: $input) {
+                    conversation {
+                      pointer
+                      id
+                    }
+                  }
+                }
+              </subscription>
+            </mainframe>
+          </request>
+
+          <request subst="true">
+            <mainframe type="graphql">
+              <variables>
+                <object name="input">
+                  <string name="conversationId">%%_space_id%%</string>
+                  <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
+                </object>
+              </variables>
+              <subscription>
+                subscription ConversationRelaySubjectChangedSubscription($input: SubjectChangedInput!) {
+                  subjectChanged(input: $input) {
+                    conversation {
+                      subject
+                      id
+                    }
+                  }
+                }
+              </subscription>
+            </mainframe>
+          </request>
+
+          <request subst="true">
+            <mainframe type="graphql">
+              <variables>
+                <object name="input">
+                  <string name="conversationId">%%_space_id%%</string>
+                  <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
+                </object>
+              </variables>
+              <subscription>
+                subscription ConversationRelayLockedSubscription($input: ConversationLockedInput!) {
+                  conversationLocked(input: $input) {
+                    conversation {
+                      locked
+                      id
+                    }
+                  }
+                }
+              </subscription>
+            </mainframe>
+          </request>
+
+          <request subst="true">
+            <mainframe type="graphql">
+              <variables>
+                <object name="input">
+                  <string name="conversationId">%%_space_id%%</string>
+                  <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
+                </object>
+              </variables>
+              <subscription>
+                subscription ConversationRelayRemovedSubscription($input: ConversationRemovedInput!) {
+                  conversationRemoved(input: $input) {
+                    conversationId
+                  }
+                }
+              </subscription>
+            </mainframe>
+          </request>
+
           <request subst="true">
             <mainframe type="graphql">
               <variables>
@@ -3908,39 +2907,12 @@
                 <number name="thumbSize">%%_thumb_size%%</number>
                 <object name="input">
                   <string name="conversationId">%%_space_id%%</string>
-                  <string name="clientMutationId">%%ts_mainframe:uuid%%</string>
-                  <object name="message">
-                    <object name="blocks">
-                      <list name="objectBlocks"/>
-                      <list name="previewBlocks"/>
-                      <list name="blockKeyOrder">
-                        <string>f2ids</string>
-                      </list>
-                      <list name="textBlocks">
-                        <object>
-                          <string name="type">TEXT</string>
-                          <string name="key">f2ids</string>
-                          <string name="body">some random message</string>
-                          <object name="attributes">
-                            <list name="highlights"/>
-                            <list name="styles"/>
-                          </object>
-                        </object>
-                      </list>
-                    </object>
-                    <object name="references">
-                      <list name="actions"/>
-                      <list name="attachments"/>
-                      <list name="blocks"/>
-                      <list name="mentions"/>
-                    </object>
-                  </object>
+                  <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
                 </object>
               </variables>
-              <mutation>
-                mutation ComposeContainerCreateMessageMutation($avatarSize: Int!, $botLogoHeight: Int!, $fullModalSize: Int!
-                $input: CreateMessageInput!, $previewSize: Int!, $thumbSize: Int!) {
-                  createMessage(input: $input) {
+              <subscription>
+                subscription ConversationRelayMessageAddedSubscription($avatarSize: Int!, $botLogoHeight: Int!, $fullModalSize: Int!, $input: MessageAddedInput!, , $previewSize: Int!, $thumbSize: Int!) {
+                  messageAdded(input: $input) {
                     conversation {
                       lastMessageIndex
                       pointer
@@ -3980,7 +2952,7 @@
                     ...SimpleAvatarAccount_actor
                     displayId
                     displayName
-                      ... on Node {
+                    ... on Node {
                       id
                     }
                   }
@@ -4378,8 +3350,8 @@
                     ...PreviewBlockActor_actor
                     ... on BotActor {
                       color
-                      }
-                      ... on Node {
+                    }
+                    ... on Node {
                       id
                     }
                   }
@@ -4391,11 +3363,1049 @@
                   displayName
                   avatarUrl(size: $avatarSize)
                 }
-              </mutation>
+              </subscription>
             </mainframe>
           </request>
-        </for>
-      </transaction>
+
+          <request subst="true">
+            <mainframe type="graphql">
+              <variables>
+                <object name ="input">
+                  <string name="conversationId">%%_space_id%%</string>
+                  <string name="startingCursor">%%_space_cursor%%</string>
+                  <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
+                </object>
+              </variables>
+              <subscription>
+                subscription ConversationRelayActionChangedSubscription($input: ActionChangedInput!) {
+                 actionChanged(input: $input) {
+                   action {
+                     id
+                     selfAssignee {
+                       state
+                     }
+                   }
+                 }
+                 }
+              </subscription>
+            </mainframe>
+          </request>
+
+          <request subst="true">
+            <mainframe type="graphql">
+              <variables>
+                <object name ="input">
+                  <string name="conversationId">%%_space_id%%</string>
+                  <string name="cursor">%%_space_cursor%%</string>
+                  <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
+                </object>
+              </variables>
+              <subscription>
+                subscription ConversationRelayMessageAcksChangedSubscription($input: MessageAcksChangedInput!) {
+                  messageAcksChanged(input: $input) {
+                    message {
+                      ...AckButton_message
+                      id
+                    }
+                  }
+                }
+
+                fragment AckButton_message on Message {
+                  acks {
+                    __typename
+                    ... on Node {
+                      id
+                    }
+                    displayName
+                  }
+                  acksCount
+                  id
+                  selfAcked
+                }
+              </subscription>
+            </mainframe>
+          </request>
+
+          <request subst="true">
+            <mainframe type="graphql">
+              <variables>
+                <number name="avatarSize">%%_avatar_size%%</number>
+                <number name="botLogoHeight">%%_bot_logo_height%%</number>
+                <number name="fullModalSize">%%_full_modal_size%%</number>
+                <number name="previewSize">%%_preview_size%%</number>
+                <number name="thumbSize">%%_thumb_size%%</number>
+                <object name ="input">
+                  <string name="conversationId">%%_space_id%%</string>
+                  <string name="cursor">%%_space_cursor%%</string>
+                  <string name="clientSubscriptionId">%%ts_mainframe:uuid%%</string>
+                </object>
+              </variables>
+              <subscription>
+                subscription ConversationRelayMessageContentChangedSubscription($avatarSize: Int!, $botLogoHeight: Int!, $fullModalSize: Int!, $input: MessageContentChangedInput!, $previewSize: Int!, $thumbSize: Int!) {
+                  messageContentChanged(input: $input) {
+                    message {
+                      ...BasicMessage_message
+                      ...SysMessage_message
+                      actor {
+                        __typename
+                        ... on Node {
+                          id
+                        }
+                      }
+                      availableActions {
+                        id
+                      }
+                      creationTime
+                      id
+                      index
+                      source
+                    }
+                  }
+                }
+
+                fragment BasicMessage_message on Message {
+                  ...AckButton_message
+                  ...AttachmentImage_message
+                  ...BotBlock_message
+                  ...PreviewBlock_message
+                  ...TextBlock_message
+                  actor {
+                    __typename
+                    ...SimpleAvatarAccount_actor
+                    displayId
+                    displayName
+                    ... on Node {
+                      id
+                    }
+                  }
+                  blocks {
+                    __typename
+                    ... on MessageBlockText {
+                      ...TextBlock_block
+                      type
+                      key
+                    }
+                    ... on MessageBlockObject {
+                      references {
+                        __typename
+                        ... on MessageReferenceAttachment {
+                          attachment {
+                            id
+                            mimetype
+                            ...AttachmentFile_attachment
+                            ...AttachmentImage_attachment
+                          }
+                        }
+                        ... on MessageReferenceLink {
+                          metadata
+                          url
+                        }
+                      }
+                      type
+                      key
+                    }
+                    ... on MessageBlockUiPayload {
+                      key
+                      type
+                      uiPayload {
+                        ui
+                      }
+                    }
+                    ... on MessageBlockPreview {
+                      link
+                      previews {
+                        ...PreviewBlock_previews
+                      }
+                      type
+                      key
+                    }
+                  }
+                  id
+                }
+
+                fragment SysMessage_message on Message {
+                  ...ActionCubicleMessage_message
+                  ...ConvoCubicleMessage_message
+                  ...ConvoSysMessage_message
+                  ...OrgCubicleMessage_message
+                  creationTime
+                  type
+                }
+
+                fragment ActionCubicleMessage_message on Message {
+                  type
+                  creationTime
+                  actor {
+                    __typename
+                    displayId
+                    displayName
+                    ... on Node {
+                      id
+                    }
+                  }
+                  extra {
+                    __typename
+                    ... on MessageExtraAction {
+                      actionTitle
+                      conversationSubject
+                      conversationType
+                      action {
+                        title
+                        originId
+                        conversation {
+                          subject
+                          type
+                          id
+                        }
+                        id
+                      }
+                    }
+                  }
+                }
+
+                fragment ConvoCubicleMessage_message on Message {
+                  type
+                  creationTime
+                  actor {
+                    __typename
+                    ...SimpleAvatarAccount_actor
+                    displayId
+                    displayName
+                    ... on Node {
+                      id
+                    }
+                  }
+                  extra {
+                    __typename
+                    ... on MessageExtraConvo {
+                      conversationSubject
+                      conversationType
+                      conversation {
+                        ...SimpleAvatarConvo_conversation
+                        type
+                        subject
+                        participantCount
+                        id
+                      }
+                    }
+                    ... on MessageExtraConvoMessage {
+                      conversationSubject
+                      conversationType
+                      messageBody
+                      conversation {
+                        ...SimpleAvatarConvo_conversation
+                        type
+                        subject
+                        participantCount
+                        id
+                      }
+                      message {
+                        id
+                        blocks {
+                          __typename
+                          ... on MessageBlockText {
+                            body
+                          }
+                        }
+                      }
+                    }
+                    ... on MessageExtraConvoParticipant {
+                      conversationSubject
+                      conversationType
+                      conversation {
+                        ...SimpleAvatarConvo_conversation
+                        type
+                        subject
+                        participantCount
+                        id
+                      }
+                      participant {
+                        ...SimpleAvatarAccount_actor
+                        displayId
+                        displayName
+                        ... on Node {
+                          id
+                        }
+                        id
+                      }
+                    }
+                  }
+                }
+
+                fragment ConvoSysMessage_message on Message {
+                  type
+                  creationTime
+                  actor {
+                    __typename
+                    displayName
+                    ... on Node {
+                      id
+                    }
+                  }
+                  extra {
+                    __typename
+                    ... on MessageExtraParticipant {
+                      participant {
+                        __typename
+                        displayName
+                        ... on Node {
+                          id
+                        }
+                      }
+                    }
+                    ... on MessageExtraSubject {
+                      subject
+                    }
+                  }
+                }
+
+                fragment OrgCubicleMessage_message on Message {
+                  type
+                  creationTime
+                  actor {
+                    __typename
+                    ...SimpleAvatarAccount_actor
+                    displayId
+                    displayName
+                    ... on Node {
+                      id
+                    }
+                  }
+                  extra {
+                    __typename
+                    ... on MessageExtraOrg {
+                      org {
+                        actor {
+                          __typename
+                          ...SimpleAvatarAccount_actor
+                          displayId
+                          displayName
+                            ... on Node {
+                              id
+                            }
+                          }
+                          id
+                          memberCount
+                        }
+                        orgActor {
+                          ...SimpleAvatarAccount_actor
+                          displayId
+                          displayName
+                          ... on Node {
+                            id
+                          }
+                          id
+                        }
+                      }
+                      ... on MessageExtraOrgMember {
+                        org {
+                          actor {
+                          __typename
+                          ...SimpleAvatarAccount_actor
+                          displayId
+                          displayName
+                          ... on Node {
+                            id
+                          }
+                        }
+                        id
+                        memberCount
+                      }
+                      member {
+                        ...SimpleAvatarAccount_actor
+                        displayId
+                        displayName
+                        ... on Node {
+                          id
+                        }
+                        id
+                      }
+                      orgActor {
+                        ...SimpleAvatarAccount_actor
+                        displayId
+                        displayName
+                        ... on Node {
+                          id
+                        }
+                        id
+                      }
+                    }
+                  }
+                }
+
+                fragment SimpleAvatarAccount_actor on Actor {
+                  displayId
+                  displayName
+                  avatarUrl(size: $avatarSize)
+                }
+
+                fragment SimpleAvatarConvo_conversation on Conversation {
+                  avatarUrl(size: $avatarSize)
+                  subject
+                }
+
+                fragment AckButton_message on Message {
+                  acks {
+                    __typename
+                    ... on Node {
+                      id
+                    }
+                    displayName
+                  }
+                  acksCount
+                  id
+                  selfAcked
+                }
+
+                fragment AttachmentImage_message on Message {
+                  creationTime
+                  actor {
+                    __typename
+                    ... on Node {
+                      id
+                    }
+                  }
+                }
+
+                fragment BotBlock_message on Message {
+                  actor {
+                    __typename
+                    ... on BotActor {
+                      logoUrl(height: $botLogoHeight)
+                      color
+                    }
+                    uref
+                    ... on Node {
+                      id
+                    }
+                  }
+                }
+
+                fragment PreviewBlock_message on Message {
+                  ...BotBlock_message
+                }
+
+                fragment TextBlock_message on Message {
+                  creationTime
+                  index
+                }
+
+                fragment TextBlock_block on MessageBlockText {
+                  attributes {
+                    __typename
+                    ... on TextAttributeStyle {
+                      length
+                      start
+                      styles
+                      type
+                    }
+                    ... on TextAttributeHighlight {
+                      length
+                      references {
+                        __typename
+                        ... on MessageReferenceAction {
+                          type
+                          action {
+                            id
+                            selfAssignee {
+                              state
+                            }
+                          }
+                        }
+                        ... on MessageReferenceMention {
+                          selfMentioned
+                          type
+                          target {
+                            __typename
+                            displayId
+                            ... on Node {
+                              id
+                            }
+                          }
+                        }
+                      }
+                      start
+                      type
+                    }
+                  }
+                  body
+                }
+
+                fragment AttachmentFile_attachment on Attachment {
+                  id
+                  filename
+                  mimetype
+                  size
+                  url
+                  metadata
+                  originalImage {
+                    height
+                    width
+                  }
+                  thumbnail(width: $thumbSize) {
+                    url
+                    size
+                  }
+                }
+
+                fragment AttachmentImage_attachment on Attachment {
+                  metadata
+                  url
+                  filename
+                  mimetype
+                  processed
+                  previewImage: thumbnail(width: $previewSize) {
+                    url
+                    width
+                    height
+                  }
+                  fullModalImage: thumbnail(width: $fullModalSize) {
+                    url
+                    width
+                    height
+                  }
+                }
+
+                fragment PreviewBlock_previews on UiPayload {
+                  generator {
+                    __typename
+                    ...PreviewBlockActor_actor
+                    ... on BotActor {
+                      color
+                    }
+                    ... on Node {
+                      id
+                    }
+                  }
+                  ui
+                }
+
+                fragment PreviewBlockActor_actor on Actor {
+                  displayId
+                  displayName
+                  avatarUrl(size: $avatarSize)
+                }
+              </subscription>
+            </mainframe>
+          </request>
+
+        </transaction> <!-- Space subscriptions -->
+
+
+        <!-- ====================================================================
+        == Sending messages
+        ===================================================================== -->
+
+        <transaction name="messages">
+
+          <for from="1" to="&message_count;" incr="1" var="counter">
+            <if var="wait_between_messages" eq="true">
+              <thinktime value="&time_between_messages;" random="true"></thinktime>
+            </if>
+            <request subst="true">
+              <mainframe type="graphql">
+                <variables>
+                  <number name="avatarSize">%%_avatar_size%%</number>
+                  <number name="botLogoHeight">%%_bot_logo_height%%</number>
+                  <number name="fullModalSize">%%_full_modal_size%%</number>
+                  <number name="previewSize">%%_preview_size%%</number>
+                  <number name="thumbSize">%%_thumb_size%%</number>
+                  <object name="input">
+                    <string name="conversationId">%%_space_id%%</string>
+                    <string name="clientMutationId">%%ts_mainframe:uuid%%</string>
+                    <message name="message">
+                      <body>some random message</body>
+                    </message>
+                    <!-- <object name="message">
+                      <object name="blocks">
+                        <list name="objectBlocks"/>
+                        <list name="previewBlocks"/>
+                        <list name="blockKeyOrder">
+                          <string>f2ids</string>
+                        </list>
+                        <list name="textBlocks">
+                          <object>
+                            <string name="type">TEXT</string>
+                            <string name="key">f2ids</string>
+                            <string name="body">some random message</string>
+                            <object name="attributes">
+                              <list name="highlights"/>
+                              <list name="styles"/>
+                            </object>
+                          </object>
+                        </list>
+                      </object>
+                      <object name="references">
+                        <list name="actions"/>
+                        <list name="attachments"/>
+                        <list name="blocks"/>
+                        <list name="mentions"/>
+                      </object>
+                    </object> -->
+                  </object>
+                </variables>
+                <mutation>
+                  mutation ComposeContainerCreateMessageMutation($avatarSize: Int!, $botLogoHeight: Int!, $fullModalSize: Int!
+                  $input: CreateMessageInput!, $previewSize: Int!, $thumbSize: Int!) {
+                    createMessage(input: $input) {
+                      conversation {
+                        lastMessageIndex
+                        pointer
+                        id
+                      }
+                      messageEdge {
+                        cursor
+                        node {
+                          ...BasicMessage_message
+                          ...SysMessage_message
+                          actor {
+                            __typename
+                            ... on Node {
+                              id
+                            }
+                          }
+                          availableActions {
+                            id
+                          }
+                          creationTime
+                          id
+                          index
+                          source
+                        }
+                      }
+                    }
+                  }
+
+                  fragment BasicMessage_message on Message {
+                    ...AckButton_message
+                    ...AttachmentImage_message
+                    ...BotBlock_message
+                    ...PreviewBlock_message
+                    ...TextBlock_message
+                    actor {
+                      __typename
+                      ...SimpleAvatarAccount_actor
+                      displayId
+                      displayName
+                        ... on Node {
+                        id
+                      }
+                    }
+                    blocks {
+                      __typename
+                      ... on MessageBlockText {
+                        ...TextBlock_block
+                        type
+                        key
+                      }
+                      ... on MessageBlockObject {
+                        references {
+                          __typename
+                          ... on MessageReferenceAttachment {
+                            attachment {
+                              id
+                              mimetype
+                              ...AttachmentFile_attachment
+                              ...AttachmentImage_attachment
+                            }
+                          }
+                          ... on MessageReferenceLink {
+                            metadata
+                            url
+                          }
+                        }
+                        type
+                        key
+                      }
+                      ... on MessageBlockUiPayload {
+                        key
+                        type
+                        uiPayload {
+                          ui
+                        }
+                      }
+                      ... on MessageBlockPreview {
+                        link
+                        previews {
+                          ...PreviewBlock_previews
+                        }
+                        type
+                        key
+                      }
+                    }
+                    id
+                  }
+
+                  fragment SysMessage_message on Message {
+                    ...ActionCubicleMessage_message
+                    ...ConvoCubicleMessage_message
+                    ...ConvoSysMessage_message
+                    ...OrgCubicleMessage_message
+                    creationTime
+                    type
+                  }
+
+                  fragment ActionCubicleMessage_message on Message {
+                    type
+                    creationTime
+                    actor {
+                      __typename
+                      displayId
+                      displayName
+                      ... on Node {
+                        id
+                      }
+                    }
+                    extra {
+                      __typename
+                      ... on MessageExtraAction {
+                        actionTitle
+                        conversationSubject
+                        conversationType
+                        action {
+                          title
+                          originId
+                          conversation {
+                            subject
+                            type
+                            id
+                          }
+                          id
+                        }
+                      }
+                    }
+                  }
+
+                  fragment ConvoCubicleMessage_message on Message {
+                    type
+                    creationTime
+                    actor {
+                      __typename
+                      ...SimpleAvatarAccount_actor
+                      displayId
+                      displayName
+                      ... on Node {
+                        id
+                      }
+                    }
+                    extra {
+                      __typename
+                      ... on MessageExtraConvo {
+                        conversationSubject
+                        conversationType
+                        conversation {
+                          ...SimpleAvatarConvo_conversation
+                          type
+                          subject
+                          participantCount
+                          id
+                        }
+                      }
+                      ... on MessageExtraConvoMessage {
+                        conversationSubject
+                        conversationType
+                        messageBody
+                        conversation {
+                          ...SimpleAvatarConvo_conversation
+                          type
+                          subject
+                          participantCount
+                          id
+                        }
+                        message {
+                          id
+                          blocks {
+                            __typename
+                            ... on MessageBlockText {
+                              body
+                            }
+                          }
+                        }
+                      }
+                      ... on MessageExtraConvoParticipant {
+                        conversationSubject
+                        conversationType
+                        conversation {
+                          ...SimpleAvatarConvo_conversation
+                          type
+                          subject
+                          participantCount
+                          id
+                        }
+                        participant {
+                          ...SimpleAvatarAccount_actor
+                          displayId
+                          displayName
+                          ... on Node {
+                            id
+                          }
+                          id
+                        }
+                      }
+                    }
+                  }
+
+                  fragment ConvoSysMessage_message on Message {
+                    type
+                    creationTime
+                    actor {
+                      __typename
+                      displayName
+                      ... on Node {
+                        id
+                      }
+                    }
+                    extra {
+                      __typename
+                      ... on MessageExtraParticipant {
+                        participant {
+                          __typename
+                          displayName
+                          ... on Node {
+                            id
+                          }
+                        }
+                      }
+                      ... on MessageExtraSubject {
+                        subject
+                      }
+                    }
+                  }
+
+                  fragment OrgCubicleMessage_message on Message {
+                    type
+                    creationTime
+                    actor {
+                      __typename
+                      ...SimpleAvatarAccount_actor
+                      displayId
+                      displayName
+                      ... on Node {
+                        id
+                      }
+                    }
+                    extra {
+                      __typename
+                      ... on MessageExtraOrg {
+                        org {
+                          actor {
+                            __typename
+                            ...SimpleAvatarAccount_actor
+                            displayId
+                            displayName
+                            ... on Node {
+                              id
+                            }
+                          }
+                          id
+                          memberCount
+                        }
+                        orgActor {
+                          ...SimpleAvatarAccount_actor
+                          displayId
+                          displayName
+                          ... on Node {
+                            id
+                          }
+                          id
+                        }
+                      }
+                      ... on MessageExtraOrgMember {
+                        org {
+                          actor {
+                            __typename
+                            ...SimpleAvatarAccount_actor
+                            displayId
+                            displayName
+                            ... on Node {
+                              id
+                            }
+                          }
+                          id
+                          memberCount
+                        }
+                        member {
+                          ...SimpleAvatarAccount_actor
+                          displayId
+                          displayName
+                          ... on Node {
+                            id
+                          }
+                          id
+                        }
+                        orgActor {
+                          ...SimpleAvatarAccount_actor
+                          displayId
+                          displayName
+                          ... on Node {
+                            id
+                          }
+                          id
+                        }
+                      }
+                    }
+                  }
+
+                  fragment SimpleAvatarAccount_actor on Actor {
+                    displayId
+                    displayName
+                    avatarUrl(size: $avatarSize)
+                  }
+
+                  fragment SimpleAvatarConvo_conversation on Conversation {
+                    avatarUrl(size: $avatarSize)
+                    subject
+                  }
+
+                  fragment AckButton_message on Message {
+                    acks {
+                      __typename
+                      ... on Node {
+                        id
+                      }
+                      displayName
+                    }
+                    acksCount
+                    id
+                    selfAcked
+                  }
+
+                  fragment AttachmentImage_message on Message {
+                    creationTime
+                    actor {
+                      __typename
+                      ... on Node {
+                        id
+                      }
+                    }
+                  }
+
+                  fragment BotBlock_message on Message {
+                    actor {
+                      __typename
+                      ... on BotActor {
+                        logoUrl(height: $botLogoHeight)
+                        color
+                      }
+                      uref
+                      ... on Node {
+                        id
+                      }
+                    }
+                  }
+
+                  fragment PreviewBlock_message on Message {
+                    ...BotBlock_message
+                  }
+
+                  fragment TextBlock_message on Message {
+                    creationTime
+                    index
+                  }
+
+                  fragment TextBlock_block on MessageBlockText {
+                    attributes {
+                      __typename
+                      ... on TextAttributeStyle {
+                        length
+                        start
+                        styles
+                        type
+                      }
+                      ... on TextAttributeHighlight {
+                        length
+                        references {
+                          __typename
+                          ... on MessageReferenceAction {
+                            type
+                            action {
+                              id
+                              selfAssignee {
+                                state
+                              }
+                            }
+                          }
+                          ... on MessageReferenceMention {
+                            selfMentioned
+                            type
+                            target {
+                              __typename
+                              displayId
+                              ... on Node {
+                                id
+                              }
+                            }
+                          }
+                        }
+                        start
+                        type
+                      }
+                    }
+                    body
+                  }
+
+                  fragment AttachmentFile_attachment on Attachment {
+                    id
+                    filename
+                    mimetype
+                    size
+                    url
+                    metadata
+                    originalImage {
+                      height
+                      width
+                    }
+                    thumbnail(width: $thumbSize) {
+                      url
+                      size
+                    }
+                  }
+
+                  fragment AttachmentImage_attachment on Attachment {
+                    metadata
+                    url
+                    filename
+                    mimetype
+                    processed
+                    previewImage: thumbnail(width: $previewSize) {
+                      url
+                      width
+                      height
+                    }
+                    fullModalImage: thumbnail(width: $fullModalSize) {
+                      url
+                      width
+                      height
+                    }
+                  }
+
+                  fragment PreviewBlock_previews on UiPayload {
+                    generator {
+                      __typename
+                      ...PreviewBlockActor_actor
+                      ... on BotActor {
+                        color
+                        }
+                        ... on Node {
+                        id
+                      }
+                    }
+                    ui
+                  }
+
+                  fragment PreviewBlockActor_actor on Actor {
+                    displayId
+                    displayName
+                    avatarUrl(size: $avatarSize)
+                  }
+                </mutation>
+              </mainframe>
+            </request>
+          </for>
+
+        </transaction> <!-- Sending messages -->
+
+      </for>
 
 
       <!-- ====================================================================

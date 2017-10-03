@@ -90,14 +90,7 @@ session_defaults() ->
     {ok, true, true}.
 
 
-decode_buffer(Buffer, _Sess) ->
-    case decode_frame(Buffer) of
-      {ok, Packet, _, _} ->
-        Payload = extract_payload(Packet),
-        % Tsung do not support pre-decoded JSON :/
-        iolist_to_binary(mochijson2:encode(Payload));
-      _ -> <<>>
-    end.
+decode_buffer(_Buffer, #mainframe_session{last_response = Buffer}) -> Buffer.
 
 
 new_session() ->
@@ -108,47 +101,34 @@ dump(A, B) ->
     ts_plugin:dump(A, B).
 
 
-get_message(#mainframe_connect{client_id = ClientId} = Req,
-            #state_rcv{session = Sess, host = Host}) ->
-    NewSess = update_metrics(Req, Sess),
-    Path = websocket_path(?VALUE(ClientId)),
-    {Msg, Accept} = websocket:get_handshake(Host, Path, "", "13", ""),
-    {Msg, NewSess#mainframe_session{status = waiting_handshake, accept = Accept}};
-
-get_message(#mainframe_request{id = Id, name = Name, payload = Payload} = Req,
-            #state_rcv{session = Sess})
-  when Sess#mainframe_session.status == connected ->
-    NewSess = update_metrics(Req, Sess),
-    Msg = prepare_request(Id, Name, Payload),
-    ?DebugF("Mainframe websocket sending:~n~s~n", [Msg]),
-    {websocket:encode_text(Msg), NewSess};
-
-get_message(#mainframe_close{} = Req, #state_rcv{session = Sess})
-  when Sess#mainframe_session.status == connected ->
-    NewSess = update_metrics(Req, Sess),
-    {websocket:encode_close(<<"close">>), NewSess}.
+get_message(Req, #state_rcv{session = Sess} = State) ->
+    NewSess = prepare_metrics(Req, Sess),
+    handle_request(Req, State#state_rcv{session = NewSess}).
 
 
-parse(closed, State) ->
-    {State#state_rcv{count = 0, ack_done = true, acc = [], datasize = 0}, [], true};
+parse(closed, State = #state_rcv{session = Sess}) ->
+    Sess2 = Sess#mainframe_session{last_response = <<>>},
+    {State#state_rcv{count = 0, ack_done = true, acc = [], datasize = 0, session = Sess2}, [], true};
 
 parse(Data, State = #state_rcv{acc = [], datasize = 0}) ->
     parse(Data, State#state_rcv{datasize = size(Data)});
 
-parse(Data, State = #state_rcv{acc = [], session = Sess})
+parse(Data, State = #state_rcv{acc = [], session = Sess, request = Req})
   when Sess#mainframe_session.status == waiting_handshake ->
     Accept = Sess#mainframe_session.accept,
     case websocket:check_handshake(Data, Accept) of
       ok ->
         ?Debug("Mainframe websocket handshake succeed~n"),
         ts_mon_cache:add({count, mainframe_connect_succeed}),
-        Sess2 = Sess#mainframe_session{status = connected},
-        State2 = State#state_rcv{ack_done = true, session = Sess2},
+        Sess2 = Sess#mainframe_session{status = connected, last_response = <<>>},
+        Sess3 = update_metrics(Req#ts_request.param, Sess2),
+        State2 = State#state_rcv{ack_done = true, session = Sess3},
         {State2, [], false};
       {error, _Reason} ->
         ?DebugF("Mainframe websocket handshake failed: ~p~n", [_Reason]),
         ts_mon_cache:add({count, mainframe_connect_failed}),
-        {State#state_rcv{ack_done = true}, [], true}
+        Sess2 = Sess#mainframe_session{last_response = <<>>},
+        {State#state_rcv{ack_done = true, session = Sess2}, [], true}
     end;
 
 parse(Data, State = #state_rcv{acc = [], session = Sess, request = Req})
@@ -160,22 +140,30 @@ parse(Data, State = #state_rcv{acc = [], session = Sess, request = Req})
       {close, _Reason} ->
         ?LOGF("Mainframe websocket closed by the server: ~p~n", [_Reason], ?WARN),
         ts_mon_cache:add({count, mainframe_server_close}),
-        {State#state_rcv{count = 0, ack_done = true}, [], true};
+        Sess2 = Sess#mainframe_session{last_response = <<>>},
+        {State#state_rcv{count = 0, ack_done = true, session = Sess2}, [], true};
+      {ping, _FrameData, Left} ->
+        ?LOG("Mainframe websocket ignoring PING~n", ?WARN),
+        {State#state_rcv{acc = Left}, [], false};
       {ok, Packet, FrameData, Left} ->
         ?DebugF("Mainframe websocket received:~n~s~n", [FrameData]),
         case handle_response(Req#ts_request.param, Packet) of
           ack ->
-            {State#state_rcv{ack_done = true, acc = Left}, [], false};
+            Sess2 = Sess#mainframe_session{last_response = FrameData},
+            Sess3 = update_metrics(Req#ts_request.param, Sess2),
+            {State#state_rcv{ack_done = true, acc = Left, session = Sess3}, [], false};
           ignore ->
             {State#state_rcv{ack_done = false, acc = Left}, [], false};
           {error, _Reason} ->
-            {State#state_rcv{count = 0, ack_done = true, acc = Left}, [], true}
+            Sess2 = Sess#mainframe_session{last_response = FrameData},
+            {State#state_rcv{count = 0, ack_done = true, acc = Left, session = Sess2}, [], true}
         end;
-      {error, _Reason, _FrameData, Left} ->
-        ?DebugF("Mainframe websocket received:~n~s~n", [_FrameData]),
+      {error, _Reason, FrameData, Left} ->
+        ?DebugF("Mainframe websocket received:~n~s~n", [FrameData]),
         ?LOGF("Mainframe packet decoding error:~n~p~n", [_Reason], ?WARN),
         ts_mon_cache:add({count, mainframe_decoding_error}),
-        {State#state_rcv{count = 0, ack_done = true, acc = Left}, [], true}
+        Sess2 = Sess#mainframe_session{last_response = FrameData},
+        {State#state_rcv{count = 0, ack_done = true, acc = Left, session = Sess2}, [], true}
     end;
 
 parse(Data, State=#state_rcv{acc = Acc, datasize = DataSize}) ->
@@ -184,7 +172,7 @@ parse(Data, State=#state_rcv{acc = Acc, datasize = DataSize}) ->
           State#state_rcv{acc = [], datasize = NewSize}).
 
 
-parse_bidi(Data, State = #state_rcv{acc = [], session = Sess, request = Req})
+parse_bidi(Data, State = #state_rcv{acc = [], session = Sess})
   when Sess#mainframe_session.status == connected ->
     case decode_frame(Data) of
       more ->
@@ -195,6 +183,9 @@ parse_bidi(Data, State = #state_rcv{acc = [], session = Sess, request = Req})
         ts_mon_cache:add({count, mainframe_server_close}),
         % Tsung do not really support errors for bidi
         {nodata, State#state_rcv{count = 0}, continue};
+      {ping, FrameData, Left} ->
+        Frame = websocket:encode(FrameData, ?OP_PONG),
+        {Frame, State#state_rcv{acc = Left}, [], think};
       {ok, Packet, FrameData, Left} ->
         ?DebugF("(bidi) Mainframe websocket received:~n~s~n", [FrameData]),
         case handle_bidi(Sess, Packet) of
@@ -256,9 +247,11 @@ decode_frame(Data) ->
           {ok, Packet} -> {ok, Packet, FrameData, Left};
           {error, Reason} -> {error, Reason, FrameData, Left}
         end;
-      {OpCode, _Data, _Rest} ->
+      {?OP_PING, FrameData, Left} ->
+        {ping, FrameData, Left};
+      {OpCode, Data, Rest} ->
         ?LOGF("Unexpected websocket OP code: ~p~n", [OpCode], ?ERR),
-        {error, {unexpected_websocekt_opcode, OpCode}}
+        {error, {unexpected_websocket_opcode, OpCode}, Data, Rest}
     end.
 
 
@@ -270,48 +263,78 @@ decode_packet(Packet) ->
     end.
 
 
-extract_payload([_, _, Payload, _]) -> Payload;
-
-extract_payload([_, _, Payload]) -> Payload;
-
-extract_payload(_) -> <<>>.
-
-
 format_request(Id, Name, Payload) ->
     Json = [request, Name, Payload, Id],
     iolist_to_binary(mochijson2:encode(Json)).
 
 
-update_metrics(#mainframe_connect{}, Sess) ->
+prepare_metrics(#mainframe_connect{}, Sess) ->
     ts_mon_cache:add({count, mainframe_connect}),
     Sess;
 
-update_metrics(#mainframe_request{payload = Payload}, Sess) ->
-  update_request_metrics(Payload, Sess);
+prepare_metrics(#mainframe_request{payload = Payload}, Sess) ->
+  prepare_request_metrics(Payload, Sess);
 
-update_metrics(#mainframe_close{}, Sess) ->
+prepare_metrics(#mainframe_close{}, Sess) ->
     ts_mon_cache:add({count, mainframe_close}),
     Sess.
 
 
-update_request_metrics(#mainframe_login{}, Sess) ->
+prepare_request_metrics(#mainframe_login{}, Sess) ->
     ts_mon_cache:add({count, mainframe_login}),
     Sess;
 
-update_request_metrics(#mainframe_graphql{type = query}, Sess) ->
-    ts_mon_cache:add([{count, mainframe_graphql},
-                      {count, mainframe_graphql_query}]),
+prepare_request_metrics(#mainframe_graphql{type = Type, name = MVName}, Sess) ->
+    Name = binary_to_list(?VALUE(MVName)),
+    MetricName = list_to_atom("mainframe_graphql_count_" ++ Name),
+    Metrics = [
+      {count, mainframe_graphql_count},
+      {count, MetricName}
+    ],
+    ts_mon_cache:add(prepare_graphql_metrics(Type, Name, Metrics)),
+    Sess#mainframe_session{request_start_time = ?NOW}.
+
+
+prepare_graphql_metrics(query, _Name, Acc) ->
+    [{count, mainframe_graphql_query_count} | Acc];
+
+prepare_graphql_metrics(mutation, _Name, Acc) ->
+    [{count, mainframe_graphql_mutation_count} | Acc];
+
+prepare_graphql_metrics(subscription, _Name, Acc) ->
+    [{count, mainframe_graphql_subscription_count} | Acc].
+
+
+update_metrics(#mainframe_request{payload = Payload}, Sess) ->
+    update_request_metrics(Payload, Sess);
+
+update_metrics(_Req, Sess) -> Sess.
+
+
+update_request_metrics(#mainframe_graphql{type = Type, name = MVName},
+                       #mainframe_session{request_start_time = Start} = Sess) ->
+    End = ?NOW,
+    Name = binary_to_list(?VALUE(MVName)),
+    Elapsed = ts_utils:elapsed(Start, End),
+    MetricName = list_to_atom("mainframe_graphql_latency_" ++ Name),
+    Metrics = [
+      {sample, mainframe_graphql_latency, Elapsed},
+      {sample, MetricName, Elapsed}
+    ],
+    ts_mon_cache:add(update_graphql_metrics(Type, Name, Elapsed, Metrics)),
     Sess;
 
-update_request_metrics(#mainframe_graphql{type = mutation}, Sess) ->
-    ts_mon_cache:add([{count, mainframe_graphql},
-                      {count, mainframe_graphql_mutation}]),
-    Sess;
+update_request_metrics(_Payload, Sess) -> Sess.
 
-update_request_metrics(#mainframe_graphql{type = subscription}, Sess) ->
-    ts_mon_cache:add([{count, mainframe_graphql},
-                      {count, mainframe_graphql_subscription}]),
-    Sess.
+
+update_graphql_metrics(query, _Name, Elapsed, Acc) ->
+    [{sample, mainframe_graphql_query_latency, Elapsed} | Acc];
+
+update_graphql_metrics(mutation, _Name, Elapsed, Acc) ->
+    [{sample, mainframe_graphql_mutation_latency, Elapsed} | Acc];
+
+update_graphql_metrics(subscription, _Name, Elapsed, Acc) ->
+    [{sample, mainframe_graphql_subscription_latency, Elapsed} | Acc].
 
 
 prepare_request(Id, Name, Params) ->
@@ -344,6 +367,24 @@ prepare_payload(#mainframe_graphql{name = Name, graphql = Graphql, variables = V
      {query, ?VALUE(Graphql)},
      {variables, ?VALUE(Vars)},
      {version, ?VALUE(Ver)}].
+
+
+handle_request(#mainframe_connect{client_id = ClientId},
+               #state_rcv{session = Sess, host = Host}) ->
+    Path = websocket_path(?VALUE(ClientId)),
+    {Msg, Accept} = websocket:get_handshake(Host, Path, "", "13", ""),
+    {Msg, Sess#mainframe_session{status = waiting_handshake, accept = Accept}};
+
+handle_request(#mainframe_request{id = Id, name = Name, payload = Payload},
+               #state_rcv{session = Sess})
+  when Sess#mainframe_session.status == connected ->
+    Msg = prepare_request(Id, Name, Payload),
+    ?DebugF("Mainframe websocket sending:~n~s~n", [Msg]),
+    {websocket:encode_text(Msg), Sess};
+
+handle_request(#mainframe_close{}, #state_rcv{session = Sess})
+  when Sess#mainframe_session.status == connected ->
+    {websocket:encode_close(<<"close">>), Sess}.
 
 
 handle_response(#mainframe_request{id = Id, name = Name},
@@ -419,7 +460,7 @@ handle_bidi(_Sess, [<<"alert">>, <<"invalid_authentication">>, _]) ->
     ?LOG("Mainframe authentication invalidated (alert)~n", ?ERR),
     {error, authentication_invalidated};
 
-handle_bidi(Sess, Packet) ->
+handle_bidi(_Sess, Packet) ->
     ?LOGF("Received unexpected bidi packet:~n~p~n", [Packet], ?ERR),
     ts_mon_cache:add({count, mainframe_unexpected_bidi_packet}),
     {error, unexpected_bidi_packet}.
@@ -444,5 +485,5 @@ join_binaries(List, Sep) ->
 pick_random([]) -> nil;
 
 pick_random(List) ->
-  Index = random:uniform(length(List)),
+  Index = rand:uniform(length(List)),
   lists:nth(Index, List).

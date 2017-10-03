@@ -403,7 +403,7 @@ repeat | if | change_type | foreach | set_option | interaction | abort )*>
     name CDATA  #IMPLIED
     version CDATA  #IMPLIED
 >
-<!ELEMENT variables (number | boolean | string | list | object | null)* >
+<!ELEMENT variables (number | boolean | string | list | object | null | message)* >
 <!ELEMENT number (#PCDATA) >
 <!ATTLIST number
     name CDATA  #IMPLIED
@@ -416,11 +416,11 @@ repeat | if | change_type | foreach | set_option | interaction | abort )*>
 <!ATTLIST string
     name CDATA  #IMPLIED
 >
-<!ELEMENT object (number | boolean | string | list | object | null)* >
+<!ELEMENT object (number | boolean | string | list | object | null | message)* >
 <!ATTLIST object
     name CDATA  #IMPLIED
 >
-<!ELEMENT list (number | boolean | string | list | object | null)* >
+<!ELEMENT list (number | boolean | string | list | object | null | message)* >
 <!ATTLIST list
     name CDATA  #IMPLIED
 >
@@ -428,6 +428,11 @@ repeat | if | change_type | foreach | set_option | interaction | abort )*>
 <!ATTLIST null
     name CDATA  #IMPLIED
 >
+<!ELEMENT message (body) >
+<!ATTLIST message
+    name CDATA  #IMPLIED
+>
+<!ELEMENT body (#PCDATA) >
 
 <!ELEMENT amqp (#PCDATA) >
 <!ATTLIST amqp

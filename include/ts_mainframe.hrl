@@ -13,7 +13,9 @@
 
 -record(mainframe_session, {
     status,
-    accept
+    accept,
+    request_start_time,
+    last_response = <<>>
 }).
 
 -record(mainframe_login, {

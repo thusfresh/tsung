@@ -34,6 +34,12 @@
 -define(GRAPHQL_MUTATION_NAME_RX, "^[ \n\t]*mutation[ \n\t]*([a-zA-Z][a-zA-Z0-9-_]*)[ \n\t]*\\(").
 -define(GRAPHQL_SUBSCRIPTION_NAME_RX, "^[ \n\t]*subscription[ \n\t]*([a-zA-Z][a-zA-Z0-9-_]*)[ \n\t]*\\(").
 
+-define(MV_NUM(Val), mainframe_value(number, Val)).
+-define(MV_STR(Val), mainframe_value(string, Val)).
+-define(MV_BOOL(Val), mainframe_value(boolean, Val)).
+-define(MV_LIST(Val), mainframe_value(list, Val)).
+-define(MV_OBJ(Val), mainframe_value(object, Val)).
+
 
 %==============================================================================
 % API Functions
@@ -228,6 +234,8 @@ parse_graphql_name(?MV{} = Name, Graphql, Type, Ver, _Regex) ->
 
 parse_variable_value(#xmlText{}) -> ignore;
 
+parse_variable_value(#xmlComment{}) -> ignore;
+
 parse_variable_value(Element = #xmlElement{name = number}) ->
     {ok, xml_text(number, Element)};
 
@@ -242,6 +250,9 @@ parse_variable_value(Element = #xmlElement{name = list}) ->
 
 parse_variable_value(Element = #xmlElement{name = object}) ->
     parse_variable_object(Element);
+
+parse_variable_value(Element = #xmlElement{name = message}) ->
+    parse_variable_message(Element);
 
 parse_variable_value(#xmlElement{name = null}) ->
     {ok, ?MV{}}.
@@ -262,6 +273,37 @@ parse_variable_item(Element) ->
     {ok, V} -> {ok, xml_attrib(string, Element, name), V};
     Other -> Other
   end.
+
+
+parse_variable_message(Element) ->
+  ?DebugF("CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC~n~p~n", [Element]),
+  BodyElem = xml_child(Element, body),
+  Body = xml_text(string, BodyElem),
+  Id = uuid(),
+  {ok, ?MV_OBJ([
+    {<<"blocks">>, ?MV_OBJ([
+      {<<"objectBlocks">>, ?MV_LIST([])},
+      {<<"previewBlocks">>, ?MV_LIST([])},
+      {<<"blockKeyOrder">>, ?MV_LIST([?MV_STR(Id)])},
+      {<<"textBlocks">>, ?MV_LIST([
+        ?MV_OBJ([
+          {<<"type">>, ?MV_STR(<<"TEXT">>)},
+          {<<"key">>, ?MV_STR(Id)},
+          {<<"body">>, Body},
+          {<<"attributes">>, ?MV_OBJ([
+            {<<"highlights">>, ?MV_LIST([])},
+            {<<"styles">>, ?MV_LIST([])}
+          ])}
+        ])
+      ])}
+    ])},
+    {<<"references">>, ?MV_OBJ([
+      {<<"actions">>, ?MV_LIST([])},
+      {<<"attachments">>, ?MV_LIST([])},
+      {<<"blocks">>, ?MV_LIST([])},
+      {<<"mentions">>, ?MV_LIST([])}
+    ])}
+  ])}.
 
 
 xml_attrib_value(Type, Element, Name) ->
@@ -353,6 +395,26 @@ mainframe_value(string, Value) ->
       true -> ?MV{type = string, ready = false, value = convert(string, Value)};
       false -> ?MV{type = string, ready = true, value = convert(string, Value)}
     end;
+
+mainframe_value(null, Value)
+  when Value =:= null; Value =:= nil ->
+    ?MV{type = null, ready = true, value = Value};
+
+mainframe_value(list, Values) when is_list(Values) ->
+    {ReversedValues, Ready} = lists:foldl(
+      fun(?MV{ready = R1} = V, {Acc, R2}) -> {[V | Acc], R1 and R2} end,
+      {[], true}, Values),
+    ?MV{type = list, ready = Ready, value = lists:reverse(ReversedValues)};
+
+mainframe_value(object, Values) when is_list(Values) ->
+    {ReversedItems, Ready} = lists:foldl(fun
+      ({?MV{ready = R1} = N, ?MV{ready = R2} = V}, {Acc, R3}) ->
+        {[{N, V} | Acc], R1 and R2 and R3};
+      ({N, ?MV{ready = R1} = V}, {Acc, R2}) ->
+        {[{mainframe_value(string, N), V} | Acc], R1 and R2}
+      end,
+      {[], true}, Values),
+    ?MV{type = object, ready = Ready, value = lists:reverse(ReversedItems)};
 
 mainframe_value(Type, Value) ->
     ?MV{type = Type, ready = true, value = convert(Type, Value)}.
