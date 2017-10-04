@@ -243,7 +243,13 @@ parse_variable_value(Element = #xmlElement{name = boolean}) ->
     {ok, xml_text(boolean, Element)};
 
 parse_variable_value(Element = #xmlElement{name = string}) ->
-    {ok, xml_text(string, Element)};
+    Value = xml_text(string, Element),
+    case ?VALUE(xml_attrib(boolean, Element, empty_as_null, false)) of
+      false -> {ok, Value};
+      true ->
+        Post = fun(<<>>) -> null; (V) -> V end,
+        {ok, post_value(Value, Post)}
+    end;
 
 parse_variable_value(Element = #xmlElement{name = list}) ->
     parse_variable_list(Element);

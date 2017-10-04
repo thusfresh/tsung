@@ -482,6 +482,8 @@ join_binaries(List, Sep) ->
     end, <<>>, List).
 
 
+pick_random(<<>>) -> nil;
+
 pick_random([]) -> nil;
 
 pick_random(List) ->

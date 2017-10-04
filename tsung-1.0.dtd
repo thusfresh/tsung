@@ -415,6 +415,7 @@ repeat | if | change_type | foreach | set_option | interaction | abort )*>
 <!ELEMENT string (#PCDATA) >
 <!ATTLIST string
     name CDATA  #IMPLIED
+    empty_as_null CDATA  #IMPLIED
 >
 <!ELEMENT object (number | boolean | string | list | object | null | message)* >
 <!ATTLIST object
