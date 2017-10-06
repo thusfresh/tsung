@@ -347,7 +347,7 @@ xml_text(Type, #xmlElement{content = Content}) ->
   xml_text(Type, Content);
 
 xml_text(Type, [#xmlText{value = Value} | _]) ->
-  mainframe_value(Type, string:stripe(Value, both, "\n\t ")).
+  mainframe_value(Type, trim(Value, "\n\t ")).
 
 
 xml_child(#xmlElement{content = Content}, Name) -> xml_child(Content, Name);
@@ -454,4 +454,19 @@ has_var(Value) when is_list(Value); is_binary(Value) ->
     {match, _} -> true;
     _ -> false
   end.
+
+
+% Poorly optimized trim added to support old Erlang versions
+% Should probably add some preproc condition to use string:trim/3 if available.
+trim(Value, Chars) ->
+  lists:reverse(left_trim(lists:reverse(left_trim(Value, Chars)), Chars)).
+
+
+left_trim([C | Rest] = Value, Chars) ->
+  case lists:member(C, Chars) of
+    true -> trim(Rest, Chars);
+    false -> Value
+  end.
+
+
 
