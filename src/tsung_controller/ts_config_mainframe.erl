@@ -165,7 +165,7 @@ build_request(login, Element) ->
     Username = xml_attrib(string, Element, username, ?DEFAULT_USERNAME),
     Password = xml_attrib(string, Element, password, ?DEFAULT_PASSWORD),
     Payload = #mainframe_login{username = Username, password = Password},
-    #mainframe_request{id = uuid(), name = <<"login">>, payload = Payload};
+    #mainframe_request{name = <<"login">>, payload = Payload};
 
 build_request(graphql, Element) ->
     Vars = parse_variables(Element),
@@ -180,7 +180,7 @@ build_request(graphql, Element) ->
                                  graphql = Graphql,
                                  variables = Vars,
                                  version = Version},
-    #mainframe_request{id = uuid(), name = ReqName, payload = Payload};
+    #mainframe_request{name = ReqName, payload = Payload};
 
 build_request(close, _Element) ->
     #mainframe_close{}.
@@ -347,7 +347,7 @@ xml_text(Type, #xmlElement{content = Content}) ->
   xml_text(Type, Content);
 
 xml_text(Type, [#xmlText{value = Value} | _]) ->
-  mainframe_value(Type, string:trim(Value, both, "\n\t ")).
+  mainframe_value(Type, string:stripe(Value, both, "\n\t ")).
 
 
 xml_child(#xmlElement{content = Content}, Name) -> xml_child(Content, Name);

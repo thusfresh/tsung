@@ -4,7 +4,6 @@
 }).
 
 -record(mainframe_request, {
-    id,
     name,
     payload
 }).
@@ -15,6 +14,7 @@
     status,
     accept,
     request_start_time,
+    request_id,
     last_response = <<>>
 }).
 

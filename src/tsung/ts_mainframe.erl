@@ -147,7 +147,7 @@ parse(Data, State = #state_rcv{acc = [], session = Sess, request = Req})
         {State#state_rcv{acc = Left}, [], false};
       {ok, Packet, FrameData, Left} ->
         ?DebugF("Mainframe websocket received:~n~s~n", [FrameData]),
-        case handle_response(Req#ts_request.param, Packet) of
+        case handle_response(Sess, Req#ts_request.param, Packet) of
           ack ->
             Sess2 = Sess#mainframe_session{last_response = FrameData},
             Sess3 = update_metrics(Req#ts_request.param, Sess2),
@@ -375,32 +375,36 @@ handle_request(#mainframe_connect{client_id = ClientId},
     {Msg, Accept} = websocket:get_handshake(Host, Path, "", "13", ""),
     {Msg, Sess#mainframe_session{status = waiting_handshake, accept = Accept}};
 
-handle_request(#mainframe_request{id = Id, name = Name, payload = Payload},
+handle_request(#mainframe_request{name = Name, payload = Payload},
                #state_rcv{session = Sess})
   when Sess#mainframe_session.status == connected ->
+    Id = ts_config_mainframe:uuid(),
     Msg = prepare_request(Id, Name, Payload),
     ?DebugF("Mainframe websocket sending:~n~s~n", [Msg]),
-    {websocket:encode_text(Msg), Sess};
+    {websocket:encode_text(Msg), Sess#mainframe_session{request_id = Id}};
 
 handle_request(#mainframe_close{}, #state_rcv{session = Sess})
   when Sess#mainframe_session.status == connected ->
     {websocket:encode_close(<<"close">>), Sess}.
 
 
-handle_response(#mainframe_request{id = Id, name = Name},
+handle_response(#mainframe_session{request_id = Id},
+                #mainframe_request{name = Name},
                 [<<"error">>, Name, {struct, Fields}, Id]) ->
     Reason = proplists:get_value(<<"reason">>, Fields, unknown),
     ts_mon_cache:add({count, mainframe_protocol_error}),
     ?LOGF("Mainframe protocol error received: ~p~n", [Reason], ?ERR),
     {error, protocol_error};
 
-handle_response(#mainframe_request{id = Id, name = Name},
+handle_response(#mainframe_session{request_id = Id},
+                #mainframe_request{name = Name},
                 [<<"error">>, Name, _Payload, Id]) ->
     ts_mon_cache:add({count, mainframe_protocol_error}),
     ?LOG("Unknown Mainframe protocol error received~n", ?ERR),
     {error, protocol_error};
 
-handle_response(#mainframe_request{id = Id, name = Name},
+handle_response(#mainframe_session{request_id = Id},
+                #mainframe_request{name = Name},
                 [<<"response">>, Name, {struct, Fields}, Id])
   when Name =:= <<"graphql.perform">>; Name =:= <<"graphql.subscribe">> ->
     case proplists:get_value(<<"errors">>, Fields) of
@@ -413,35 +417,38 @@ handle_response(#mainframe_request{id = Id, name = Name},
         {error, graphql_error}
     end;
 
-handle_response(#mainframe_request{id = Id, name = Name},
+handle_response(#mainframe_session{request_id = Id},
+                #mainframe_request{name = Name},
                 [<<"response">>, Name, _Payload, Id]) ->
     ack;
 
-handle_response(#mainframe_request{name = CurrName},
+handle_response(#mainframe_session{},
+                #mainframe_request{name = CurrName},
                 [<<"error">>, GotName, _Payload, _Id]) ->
     ?LOGF("Ignoring Mainframe error for ~s request while waiting for ~s response~n", [GotName, CurrName], ?ERR),
     ts_mon_cache:add({count, mainframe_ignored_error}),
     ignore;
 
-handle_response(#mainframe_request{name = CurrName},
+handle_response(#mainframe_session{},
+                #mainframe_request{name = CurrName},
                 [<<"response">>, GotName, _Payload, _Id]) ->
     ?LOGF("Ignoring Mainframe response for ~s request while waiting for ~s response~n", [GotName, CurrName], ?ERR),
     ts_mon_cache:add({count, mainframe_ignored_response}),
     ignore;
 
-handle_response(_Req, [<<"event">>, Name, _Payload]) ->
+handle_response(_Sess, _Req, [<<"event">>, Name, _Payload]) ->
     ?DebugF("Ignoring Mainframe event ~s~n", [Name]),
     ts_mon_cache:add({count, mainframe_event}),
     ignore;
 
-handle_response(_Req, [<<"alert">>, <<"account_flag_changed">>, _]) -> ignore;
+handle_response(_Sess, _Req, [<<"alert">>, <<"account_flag_changed">>, _]) -> ignore;
 
-handle_response(_Req, [<<"alert">>, <<"invalid_authentication">>, _]) ->
+handle_response(_Sess, _Req, [<<"alert">>, <<"invalid_authentication">>, _]) ->
     ts_mon_cache:add({count, mainframe_authentication_error}),
     ?LOG("Mainframe authentication invalidated (alert)~n", ?ERR),
     {error, authentication_invalidated};
 
-handle_response(#mainframe_request{name = Name}, Packet) ->
+handle_response(_Sess, #mainframe_request{name = Name}, Packet) ->
     ?LOGF("Received unexpected packet waiting for request ~s response:~n~p~n", [Name, Packet], ?ERR),
     ts_mon_cache:add({count, mainframe_unexpected_packet}),
     {error, unexpected_packet}.
